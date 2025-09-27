@@ -5,6 +5,7 @@
 #include "Node/Node.h" //这里面包含了一些标准头文件,include上总没错
 #include"syntax.tab.h"
 extern Node *root;
+extern void yyrestart(FILE *input_file);
 
 int main(int argc, char **argv){
     if (argc <= 1) return 1;

@@ -1,4 +1,6 @@
 /* lexical.l - Flex 词法分析器 */
+
+
 %{
 #include "Node/Node.h"
 #include "syntax.tab.h"
@@ -7,7 +9,7 @@ extern int yylineno;
 extern char* yytext;
 %}
 
-%option yylineno
+
 
 DIGIT       [0-9]
 LETTER      [a-zA-Z_]
@@ -25,10 +27,12 @@ FLOAT_CONST {DIGIT}+(\.{DIGIT}+)?([eE][+-]?{DIGIT}+)?
 "else"              { yylval.node = newNodeN("ELSE", "", yylineno, 0); return ELSE; }
 "while"             { yylval.node = newNodeN("WHILE", "", yylineno, 0); return WHILE; }
 
-{ID}                { yylval.node = newNodeN("ID", yytext, yylineno, 0); return ID; }
+
 
 {INT_CONST}         { yylval.node = newNodeN("INT", yytext, yylineno, 0); return INT; }
 {FLOAT_CONST}       { yylval.node = newNodeN("FLOAT", yytext, yylineno, 0); return FLOAT; }
+
+{ID}                { yylval.node = newNodeN("ID", yytext, yylineno, 0); return ID; }
 
 
 "=="    { yylval.node = newNodeN("RELOP", "", yylineno, 0); return RELOP; }
@@ -66,9 +70,9 @@ FLOAT_CONST {DIGIT}+(\.{DIGIT}+)?([eE][+-]?{DIGIT}+)?
 "/*"([^*]|\*+[^*/])*\*+"/"   { /* 忽略多行注释 */ }
 
 [ \t\r]+            { /* 忽略空格 */ }
-\n                  { yylineno++; }
 
 .                   { fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext); }
+\n                  {yylineno++;}
 
 %%
 
