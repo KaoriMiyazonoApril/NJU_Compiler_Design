@@ -90,12 +90,12 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 12 "syntax.y"
+#line 12 "./syntax.y"
 
     Node* node;
     //如果以后还需要别的类型，也可以加在这里
 
-#line 99 "syntax.tab.h"
+#line 99 "./syntax.tab.h"
 
 };
 typedef union YYSTYPE YYSTYPE;
