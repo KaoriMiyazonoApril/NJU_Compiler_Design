@@ -4,6 +4,8 @@
 #include <string.h>
 
 Node *root = NULL;
+int lab1_sign=1;
+
 
 Node *newNodeN(char *type, char *value,int lineNo, int child_count, ...) {
     Node *t = malloc(sizeof(Node));

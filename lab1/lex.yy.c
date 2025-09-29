@@ -499,7 +499,7 @@ char *yytext;
 #include "Node/Node.h"
 #include "syntax.tab.h"
 
-extern int yylineno;
+extern int yylineno,lab1_sign;
 extern char* yytext;
 #line 505 "./lex.yy.c"
 #line 506 "./lex.yy.c"
@@ -963,7 +963,7 @@ YY_RULE_SETUP
 case 37:
 YY_RULE_SETUP
 #line 74 "./lexical.l"
-{ fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext); }
+{ lab1_sign=0;fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext); }
 	YY_BREAK
 case 38:
 /* rule 38 can match eol */

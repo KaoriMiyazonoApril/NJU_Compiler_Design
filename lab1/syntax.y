@@ -5,7 +5,7 @@
     #include "lex.yy.c"
     #include "syntax.tab.h"
     extern Node* root;
-    extern int yylineno;
+    extern int yylineno,lab1_sign;
     void yyerror(const char *msg);
 %}
 
@@ -120,7 +120,8 @@ ParamDec : Specifier VarDec {
 
 CompSt : LC DefList StmtList RC {
     $$ = newNodeN("CompSt","", $1->lineNo, 4, $1, $2, $3, $4);
-};
+}
+|error RC{yyerrok;};
 
 StmtList : Stmt StmtList {
     $$ = newNodeN("StmtList","", $1->lineNo, 2, $1, $2);
@@ -144,7 +145,9 @@ Stmt : Exp SEMI {
 }
 | WHILE LP Exp RP Stmt {
     $$ = newNodeN("Stmt","", $1->lineNo, 5, $1, $2, $3, $4, $5);
-};
+}
+|error SEMI {yyerrok;}
+;
 
 DefList : Def DefList {
     $$ = newNodeN("DefList","", $1->lineNo, 2, $1, $2);
@@ -222,7 +225,8 @@ Exp : Exp ASSIGNOP Exp {
 }
 | FLOAT {
     $$ = newNodeN("Exp","", $1->lineNo, 1, $1);
-};
+}
+|error RP{yyerrok;};
 
 Args : Exp COMMA Args {
     $$ = newNodeN("Args","", $1->lineNo, 3, $1, $2, $3);
@@ -234,5 +238,6 @@ Args : Exp COMMA Args {
 
 
 void yyerror(const char *msg) {
-    fprintf(stderr, "Error type B at Line  %d: %s\n", yylineno, msg);
+    lab1_sign=0;
+    fprintf(stderr, "Error type B at Line %d: %s\n", yylineno, msg);
 }

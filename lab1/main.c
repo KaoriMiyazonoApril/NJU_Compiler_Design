@@ -6,6 +6,7 @@
 #include"syntax.tab.h"
 extern Node *root;
 extern void yyrestart(FILE *input_file);
+extern int lab1_sign;
 
 int main(int argc, char **argv){
     if (argc <= 1) return 1;
@@ -18,7 +19,8 @@ int main(int argc, char **argv){
     yyrestart(f);
     yyparse();
 
-    printTree(root, 0);
+    if(lab1_sign)
+        printTree(root, 0);
     freeTree(root);
     return 0;
 }

@@ -5,7 +5,7 @@
 #include "Node/Node.h"
 #include "syntax.tab.h"
 
-extern int yylineno;
+extern int yylineno,lab1_sign;
 extern char* yytext;
 %}
 
@@ -71,7 +71,7 @@ FLOAT_CONST {DIGIT}+(\.{DIGIT}+)?([eE][+-]?{DIGIT}+)?
 
 [ \t\r]+            { /* 忽略空格 */ }
 
-.                   { fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext); }
+.                   { lab1_sign=0;fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext); }
 \n                  {yylineno++;}
 
 %%
