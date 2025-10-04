@@ -1,0 +1,168 @@
+# 编译原理实验一 实验报告
+
+## 分工
+
+小组由三位同学组成,分工如下:
+
+词法分析:付安胜
+
+语法分析和报告撰写:丁楚阳
+
+额外功能实现和测试:王文昊
+
+
+
+## 协作方式
+
+小组建立了GitHub仓库,成员将本地测试成功的文件上传并与主分支merge,让每个成员都能时刻同步最新的代码,保证成员之间的有效交流,GitHub地址如下:
+
+https://github.com/KaoriMiyazonoApril/NJU_Compiler_Design
+
+
+
+## 编译方法
+
+小组沿用了助教团队提供的makefile 文件,只需要在makefile文件目录下make即可得到parser可执行文件
+
+
+
+## 功能和实现方法
+
+小组实现了词法和语法分析模块,从而将代码转化成了语法树,并打印出语法树元素,对不符合词法语法规则的代码报错
+
+### 词法部分
+
+通过正则表达式来识别词法单元,并将词法单元提供给语法分析模块
+
+部分重要的正则表达式和识别规则
+
+```
+DIGIT       [0-9]
+LETTER      [a-zA-Z_]
+ID          {LETTER}({LETTER}|{DIGIT})*
+INT_CONST   {DIGIT}+
+FLOAT_CONST {DIGIT}+(\.{DIGIT}+)?([eE][+-]?{DIGIT}+)?
+
+"//".*              { /* 忽略单行注释 */ }
+
+
+"/*"([^*]|\*+[^*/])*\*+"/"   { /* 忽略多行注释 */ }
+
+[ \t\r]+            { /* 忽略空格 */ }
+```
+
+对于错误识别和行号维护
+
+```
+.                   { lab1_sign=0;fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext); }
+\n                  {yylineno++;}
+```
+
+
+
+### 语法分析
+
+树的构建
+
+抽象出Node这一结构体,以Node*组成树,Node的结构如下
+
+```
+typedef struct Node {
+    char* type;//类型
+    char *value; // 值
+    int lineNo;//在第几行
+    struct Node** children;//按照子单元数量malloc出的数组
+    int child_count;
+} Node;
+```
+
+
+
+构建树的过程,通过可变参数的方式,将子节点直接同时append到父结点上,print函数和树的free过程非核心代码,不予列举
+
+```
+Node *newNodeN(char *type, char *value,int lineNo, int child_count, ...) {
+    Node *t = malloc(sizeof(Node));
+    t->child_count = child_count, t->lineNo = lineNo;
+    
+
+    t->type = malloc(strlen(type)+1);
+    strcpy(t->type, type);
+
+    t->value=malloc(strlen(value)+1);
+    strcpy(t->value, value);
+
+    if (child_count > 0) {
+        t->children = (Node **)(malloc(child_count * sizeof(Node *)));
+    } else {
+        t->children=NULL;
+    }
+
+    va_list args;
+    va_start(args, child_count); //开始取参数，从 child_count 之后的第一个变参起
+
+    for (int i = 0; i < child_count; i++) {
+        t->children[i] = va_arg(args, Node *); //每个参数都是 Node*
+    }
+    va_end(args);
+    return t;
+}
+```
+
+
+
+syntax.y部分
+
+包含语法单元的定义,优先级,组成规则,错误处理
+
+其中定义和组成规则按照pdf要求,不多赘述
+
+优先级方面,从而消除了运算和if else 语句的二义性
+
+```
+//优先级
+%right ASSIGNOP
+%left OR
+%left AND
+%nonassoc RELOP
+%left PLUS MINUS
+%left STAR DIV
+%right NOT
+%left DOT
+%left LB RB
+%left LP RP
+%nonassoc LOWER_THAN_ELSE
+%nonassoc ELSE
+
+```
+
+
+
+错误处理方面,让行结束符“;”以及括号“{”、“}”、“(”、“)”等作为错误恢复的同步符号,为了识别所有错误,使用yerrorok防止只识别到一个错误就终止
+
+```
+CompSt : 忽略
+|error RC{yyerrok;};
+
+
+Stmt : 忽略
+|error SEMI {yyerrok;}
+;
+
+Exp : 忽略
+|error RP{yyerrok;};
+```
+
+
+
+
+
+错误打印部分
+
+```
+void yyerror(const char *msg) {
+    lab1_sign=0;
+    fprintf(stderr, "Error type B at Line %d: %s\n", yylineno, msg);
+}
+```
+
