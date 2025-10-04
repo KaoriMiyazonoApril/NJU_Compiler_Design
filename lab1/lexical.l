@@ -5,7 +5,7 @@
 #include "Node/Node.h"
 #include "syntax.tab.h"
 
-extern int yylineno,lab1_sign;
+extern int yylineno,lab1_sign,last_error_line;
 extern char* yytext;
 %}
 
@@ -14,9 +14,9 @@ extern char* yytext;
 DIGIT       [0-9]
 LETTER      [a-zA-Z_]
 ID          {LETTER}({LETTER}|{DIGIT})*
-INT_CONST   {DIGIT}+
-FLOAT_CONST {DIGIT}+(\.{DIGIT}+)?([eE][+-]?{DIGIT}+)?
-
+INT_CONST   0|[1-9]{DIGIT}*
+FLOAT_CONST (({DIGIT}*\.{DIGIT}+)|({DIGIT}+\.{DIGIT}*))([eE][+-]?{DIGIT}+)?
+ERROR       (0({DIGIT}|{LETTER})+)|(.\..\..)
 %%
 
 "int"               { yylval.node = newNodeN("TYPE", "int", yylineno, 0); return TYPE; }
@@ -30,9 +30,23 @@ FLOAT_CONST {DIGIT}+(\.{DIGIT}+)?([eE][+-]?{DIGIT}+)?
 
 
 {INT_CONST}         { yylval.node = newNodeN("INT", yytext, yylineno, 0); return INT; }
-{FLOAT_CONST}       { yylval.node = newNodeN("FLOAT", yytext, yylineno, 0); return FLOAT; }
+{FLOAT_CONST}       { 
+                      double value = atof(yytext);
+                      char decimal[64];
+                      snprintf(decimal, sizeof(decimal), "%.6f", value);
+                      yylval.node = newNodeN("FLOAT", decimal, yylineno, 0); 
+                      //printf("Lexer: Found FLOAT '%s' at line %d\n", yytext, yylineno);
+                      return FLOAT;  
+                    }
 
 {ID}                { yylval.node = newNodeN("ID", yytext, yylineno, 0); return ID; }
+
+{ERROR}             {if (yylineno != last_error_line) {
+                          last_error_line = yylineno;
+                          lab1_sign = 0;
+                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
+                          }
+                    }
 
 
 "=="    { yylval.node = newNodeN("RELOP", "", yylineno, 0); return RELOP; }
@@ -64,14 +78,36 @@ FLOAT_CONST {DIGIT}+(\.{DIGIT}+)?([eE][+-]?{DIGIT}+)?
 "}"                 { yylval.node = newNodeN("RC", "", yylineno, 0); return RC; }
 
 
-"//".*              { /* 忽略单行注释 */ }
+"//".*              {  if (yylineno != last_error_line) {
+                          last_error_line = yylineno;
+                          lab1_sign = 0;
+                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
+                          }
+                    }
 
 
-"/*"([^*]|\*+[^*/])*\*+"/"   { /* 忽略多行注释 */ }
-
+"/*"                { if (yylineno != last_error_line) {
+                          last_error_line = yylineno;
+                          lab1_sign = 0;
+                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
+                          }
+                    }
+                    
+"*/"                { if (yylineno != last_error_line) {
+                          last_error_line = yylineno;
+                          lab1_sign = 0;
+                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
+                          }
+                    }
+ 
 [ \t\r]+            { /* 忽略空格 */ }
 
-.                   { lab1_sign=0;fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext); }
+.                   {  if (yylineno != last_error_line) {
+                          last_error_line = yylineno;
+                          lab1_sign = 0;
+                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
+                          }
+                    }
 \n                  {yylineno++;}
 
 %%

@@ -5,6 +5,7 @@
 
 Node *root = NULL;
 int lab1_sign=1;
+int last_error_line=-1;
 
 
 Node *newNodeN(char *type, char *value,int lineNo, int child_count, ...) {
@@ -39,7 +40,7 @@ void printTree(Node *node, int depth) {
         return;
 
     for (int i = 0; i < depth; i++) {
-        printf(" ");
+        printf("  ");
     }
     if (node->child_count > 0) {
         printf("%s (%d)\n", node->type, node->lineNo);

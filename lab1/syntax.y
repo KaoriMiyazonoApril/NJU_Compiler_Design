@@ -5,7 +5,7 @@
     #include "lex.yy.c"
     #include "syntax.tab.h"
     extern Node* root;
-    extern int yylineno,lab1_sign;
+    extern int yylineno,lab1_sign,last_error_line;
     void yyerror(const char *msg);
 %}
 
@@ -146,7 +146,10 @@ Stmt : Exp SEMI {
 | WHILE LP Exp RP Stmt {
     $$ = newNodeN("Stmt","", $1->lineNo, 5, $1, $2, $3, $4, $5);
 }
-|error SEMI {yyerrok;}
+|error SEMI {
+//printf("Syntax error recovered at line %d and last_error_line is %d\n", yylineno,last_error_line);
+yyerrok;
+}
 ;
 
 DefList : Def DefList {
@@ -226,7 +229,8 @@ Exp : Exp ASSIGNOP Exp {
 | FLOAT {
     $$ = newNodeN("Exp","", $1->lineNo, 1, $1);
 }
-|error RP{yyerrok;};
+|error RP{yyerrok;}
+;
 
 Args : Exp COMMA Args {
     $$ = newNodeN("Args","", $1->lineNo, 3, $1, $2, $3);
@@ -238,6 +242,9 @@ Args : Exp COMMA Args {
 
 
 void yyerror(const char *msg) {
-    lab1_sign=0;
-    fprintf(stderr, "Error type B at Line %d: %s\n", yylineno, msg);
+    if (yylineno != last_error_line) {
+        last_error_line = yylineno;
+        lab1_sign = 0;
+        fprintf(stderr, "Error type B at Line %d: %s\n", yylineno, msg);
+    }
 }
