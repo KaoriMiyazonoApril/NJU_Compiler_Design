@@ -5,7 +5,7 @@
     #include "lex.yy.c"
     #include "syntax.tab.h"
     extern Node* root;
-    extern int yylineno,lab1_sign,bison_last_error_line;
+    extern int yylineno,lab1_sign,bison_last_error_line,last_error_line;
     void yyerror(const char *msg);
 %}
 
@@ -27,6 +27,9 @@
 %type<node> StructSpecifier OptTag DefList Tag VarList
 %type<node> CompSt StmtList Exp Stmt Def DecList Dec Args
 
+//为错误恢复规则声明类型
+%type<node> error
+
 //优先级
 %right ASSIGNOP
 %left OR
@@ -38,22 +41,39 @@
 %left DOT
 %left LB RB
 %left LP RP
-%nonassoc LOWER_THAN_ELSE
 %nonassoc ELSE
 
 
 %%
-Program : ExtDefList {
+Program : error ExtDefList {
+
+}
+| ExtDefList {
     $$ = newNodeN("Program","", $1 ? $1->lineNo : @$.first_line, 1, $1);
     root = $$;
 };
 
-ExtDefList : ExtDef ExtDefList {
+ExtDefList : error SEMI ExtDefList {
+
+}
+| error ExtDefList {
+
+}
+| ExtDef ExtDefList {
     $$ = newNodeN("ExtDefList","", $1->lineNo, 2, $1, $2);
 }
 | /*Empty*/ { $$ = NULL; };
 
-ExtDef : Specifier ExtDecList SEMI {
+ExtDef : error SEMI {
+
+}
+| Specifier error SEMI {
+
+}
+| Specifier FunDec error {
+
+}
+| Specifier ExtDecList SEMI {
     $$ = newNodeN("ExtDef","", $1->lineNo, 3, $1, $2, $3);
 }
 | Specifier SEMI {
@@ -61,9 +81,6 @@ ExtDef : Specifier ExtDecList SEMI {
 }
 | Specifier FunDec CompSt {
     $$ = newNodeN("ExtDef","", $1->lineNo, 3, $1, $2, $3);
-}
-| error SEMI {
-    yyerrok;
 };
 
 ExtDecList : VarDec {
@@ -85,9 +102,6 @@ StructSpecifier : STRUCT OptTag LC DefList RC {
 }
 | STRUCT Tag {
     $$ = newNodeN("StructSpecifier","", $1->lineNo, 2, $1, $2);
-}
-| STRUCT OptTag LC error RC { 
-    yyerrok; 
 };
 
 OptTag : ID {
@@ -105,8 +119,11 @@ VarDec : ID {
 | VarDec LB INT RB {
     $$ = newNodeN("VarDec","", $1->lineNo, 4, $1, $2, $3, $4);
 }
-| VarDec LB error RB { 
-    yyerrok; 
+| error {
+
+}
+| VarDec LB error RB {
+
 };
 
 FunDec : ID LP VarList RP {
@@ -115,8 +132,11 @@ FunDec : ID LP VarList RP {
 | ID LP RP {
     $$ = newNodeN("FunDec","", $1->lineNo, 3, $1, $2, $3);
 }
-| ID LP error RP { 
-    yyerrok; 
+| error RP {
+
+}
+| ID LP error RP {
+
 };
 
 VarList : ParamDec COMMA VarList {
@@ -133,14 +153,23 @@ ParamDec : Specifier VarDec {
 CompSt : LC DefList StmtList RC {
     $$ = newNodeN("CompSt","", $1->lineNo, 4, $1, $2, $3, $4);
 }
+| error RC {
+
+}
 | LC error RC {
-    yyerrok;
+
+}
+| LC DefList error RC {
+
 };
 
 StmtList : Stmt StmtList {
     $$ = newNodeN("StmtList","", $1->lineNo, 2, $1, $2);
 }
-| /*Empty*/ { $$ = NULL; };
+| /*Empty*/ { $$ = NULL; }
+| error StmtList {
+
+};
 
 Stmt : Exp SEMI {
     $$ = newNodeN("Stmt","", $1->lineNo, 2, $1, $2);
@@ -151,41 +180,44 @@ Stmt : Exp SEMI {
 | RETURN Exp SEMI {
     $$ = newNodeN("Stmt","", $1->lineNo, 3, $1, $2, $3);
 }
-| RETURN error SEMI { 
-    yyerrok; 
-}
 | IF LP Exp RP Stmt %prec LOWER_THAN_ELSE {
     $$ = newNodeN("Stmt","", $1->lineNo, 5, $1, $2, $3, $4, $5);
-}
-| IF LP error RP Stmt %prec LOWER_THAN_ELSE { 
-    yyerrok; 
 }
 | IF LP Exp RP Stmt ELSE Stmt {
     $$ = newNodeN("Stmt","", $1->lineNo, 7, $1, $2, $3, $4, $5, $6, $7);
 }
-| IF LP error RP Stmt ELSE Stmt { 
-    yyerrok; 
-}
 | WHILE LP Exp RP Stmt {
     $$ = newNodeN("Stmt","", $1->lineNo, 5, $1, $2, $3, $4, $5);
 }
-| WHILE LP error RP Stmt { 
-    yyerrok; 
-}
 | error SEMI {
-    yyerrok;
+
+}
+| RETURN error SEMI {
+
+}
+| IF LP error RP Stmt %prec LOWER_THAN_ELSE {
+
+}
+| IF LP Exp RP error %prec LOWER_THAN_ELSE {
+
+}
+| IF LP error RP Stmt ELSE Stmt {
+
+}
+| WHILE LP error RP Stmt {
+
 };
 
 DefList : Def DefList {
     $$ = newNodeN("DefList","", $1->lineNo, 2, $1, $2);
 }
-| /*Empty*/ { $$ = NULL; };
+| /*Empty*/ { $$ = NULL; }
+| error DefList {
+
+};
 
 Def : Specifier DecList SEMI {
     $$ = newNodeN("Def","", $1->lineNo, 3, $1, $2, $3);
-}
-| error SEMI { 
-    yyerrok; 
 };
 
 DecList : Dec {
@@ -193,6 +225,10 @@ DecList : Dec {
 }
 | Dec COMMA DecList {
     $$ = newNodeN("DecList","", $1->lineNo, 3, $1, $2, $3);
+}
+| error COMMA DecList {
+    Node* error_node = newNodeN("Error","", @$.first_line, 0);
+    $$ = newNodeN("DecList","", @$.first_line, 3, error_node, $2, $3);
 };
 
 Dec : VarDec {
@@ -200,9 +236,6 @@ Dec : VarDec {
 }
 | VarDec ASSIGNOP Exp {
     $$ = newNodeN("Dec","", $1->lineNo, 3, $1, $2, $3);
-}
-| VarDec ASSIGNOP error { 
-    yyerrok; 
 };
 
 Exp : Exp ASSIGNOP Exp {
@@ -232,10 +265,7 @@ Exp : Exp ASSIGNOP Exp {
 | LP Exp RP {
     $$ = newNodeN("Exp","", $2->lineNo, 3, $1, $2, $3);
 }
-| LP error RP { 
-    yyerrok; 
-}
-| MINUS Exp {
+| MINUS Exp %prec UMINUS {
     $$ = newNodeN("Exp","", $1->lineNo, 2, $1, $2);
 }
 | NOT Exp {
@@ -247,14 +277,8 @@ Exp : Exp ASSIGNOP Exp {
 | ID LP RP {
     $$ = newNodeN("Exp","", $1->lineNo, 3, $1, $2, $3);
 }
-| ID LP error RP { 
-    yyerrok; 
-}
 | Exp LB Exp RB {
     $$ = newNodeN("Exp","", $1->lineNo, 4, $1, $2, $3, $4);
-}
-| Exp LB error RB { 
-    yyerrok; 
 }
 | Exp DOT ID {
     $$ = newNodeN("Exp","", $1->lineNo, 3, $1, $2, $3);
@@ -267,6 +291,21 @@ Exp : Exp ASSIGNOP Exp {
 }
 | FLOAT {
     $$ = newNodeN("Exp","", $1->lineNo, 1, $1);
+}
+| error {
+
+}
+| Exp error Exp {
+
+}
+| LP error RP {
+
+}
+| ID LP error RP {
+
+}
+| Exp LB error RB {
+
 };
 
 Args : Exp COMMA Args {

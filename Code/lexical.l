@@ -14,8 +14,8 @@ extern char* yytext;
 DIGIT       [0-9]
 LETTER      [a-zA-Z_]
 ID          {LETTER}({LETTER}|{DIGIT})*
-INT_CONST   0|[1-9]{DIGIT}*
-FLOAT_CONST (({DIGIT}*\.{DIGIT}+)|({DIGIT}+\.{DIGIT}*))([eE][+-]?{DIGIT}+)?
+INT_CONST   [+-]?0|[1-9]{DIGIT}*
+FLOAT_CONST [+-]?(({DIGIT}*\.{DIGIT}+)|({DIGIT}+\.{DIGIT}*))([eE][+-]?{DIGIT}+)?
 ERROR       (0({DIGIT}|{LETTER})+)|(.\..\..)
 %%
 

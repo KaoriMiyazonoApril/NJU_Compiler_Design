@@ -81,7 +81,8 @@ extern int yydebug;
     ELSE = 282,                    /* ELSE  */
     WHILE = 283,                   /* WHILE  */
     TYPE = 284,                    /* TYPE  */
-    LOWER_THAN_ELSE = 285          /* LOWER_THAN_ELSE  */
+    LOWER_THAN_ELSE = 285,         /* LOWER_THAN_ELSE  */
+    UMINUS = 286                   /* UMINUS  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -95,7 +96,7 @@ union YYSTYPE
     Node* node;
     //如果以后还需要别的类型，也可以加在这里
 
-#line 99 "./syntax.tab.h"
+#line 100 "./syntax.tab.h"
 
 };
 typedef union YYSTYPE YYSTYPE;
