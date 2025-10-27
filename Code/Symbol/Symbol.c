@@ -22,12 +22,13 @@ void enterScope() {
 }
 
 void exitScope() {
+    if (top < 0) {
+        exit(-4); // 误用了exit函数,在不在括号的情况下弹出
+    }
+    
     freeSymbolStack(top);
     top--;
-    if (top <= -1) {
-        top++;
-        exit(-4);//误用了exit函数,在不在括号的情况下弹出
-    }
+    
 }
 
 //外部不要释放type,交给这边统一释放
@@ -153,6 +154,7 @@ Symbol *findSymbol(char *name) {
             }
             temp=temp->next;
         }
+        tp--;
     }
 
     return ans;
@@ -178,7 +180,7 @@ void insertSymbol(Symbol *sym) {
                 for (int i = 0; i < sym->info.func_info.argNum; i++) {
                     Type *a = sym->info.func_info.arg_list[i]->info.var_info.type;
                     Type *b = t->info.func_info.arg_list[i]->info.var_info.type;
-                    if (TypeEqual(a, b) == 0) {//类型为false
+                    if (TypeEqual(a, b) != 0) {//类型为false
                         error_code = 19;
                         return;
                     }
@@ -206,7 +208,7 @@ bool isInStruct(Symbol *sym, char *name) {
     }
 
     for (int i = 0; i < sym->info.struct_info.symbolNum; i++) {
-        if (strcmp(sym->info.struct_info.symbol_list[i]->name, name)) {
+        if (strcmp(sym->info.struct_info.symbol_list[i]->name, name)==0) {
             return true;
         }
     }
