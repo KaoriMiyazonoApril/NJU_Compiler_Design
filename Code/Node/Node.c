@@ -7,7 +7,6 @@ Node *root = NULL;
 int lab1_sign=1;
 int last_error_line=-1,bison_last_error_line=-1;//后面一个标志是语法错误
 
-
 Node *newNodeN(char *type, char *value,int lineNo, int child_count, ...) {
     Node *t = malloc(sizeof(Node));
     t->child_count = child_count, t->lineNo = lineNo;

@@ -45,10 +45,7 @@
 
 
 %%
-Program : error ExtDefList {
-
-}
-| ExtDefList {
+Program :ExtDefList {
     $$ = newNodeN("Program","", $1 ? $1->lineNo : @$.first_line, 1, $1);
     root = $$;
 };
@@ -70,6 +67,9 @@ ExtDef : error SEMI {
 | Specifier error SEMI {
 
 }
+| error Specifier SEMI {
+
+}
 | Specifier FunDec error {
 
 }
@@ -88,6 +88,12 @@ ExtDecList : VarDec {
 }
 | VarDec COMMA ExtDecList {
     $$ = newNodeN("ExtDecList","", $1->lineNo, 3, $1, $2, $3);
+}
+|VarDec error{
+
+}
+|VarDec error ExtDecList{
+
 };
 
 Specifier : TYPE {
@@ -102,6 +108,9 @@ StructSpecifier : STRUCT OptTag LC DefList RC {
 }
 | STRUCT Tag {
     $$ = newNodeN("StructSpecifier","", $1->lineNo, 2, $1, $2);
+}
+|STRUCT OptTag LC error RC{
+
 };
 
 OptTag : ID {
@@ -124,6 +133,9 @@ VarDec : ID {
 }
 | VarDec LB error RB {
 
+}
+| VarDec LB error{
+
 };
 
 FunDec : ID LP VarList RP {
@@ -136,6 +148,12 @@ FunDec : ID LP VarList RP {
 
 }
 | ID LP error RP {
+
+}
+| ID LP error{
+
+}
+|error LP VarList RP{
 
 };
 
@@ -192,7 +210,13 @@ Stmt : Exp SEMI {
 | error SEMI {
 
 }
+|Exp error{
+
+}
 | RETURN error SEMI {
+
+}
+|RETURN Exp error{
 
 }
 | IF LP error RP Stmt %prec LOWER_THAN_ELSE {
@@ -218,6 +242,9 @@ DefList : Def DefList {
 
 Def : Specifier DecList SEMI {
     $$ = newNodeN("Def","", $1->lineNo, 3, $1, $2, $3);
+}
+|Specifier error SEMI{
+
 };
 
 DecList : Dec {
@@ -227,8 +254,13 @@ DecList : Dec {
     $$ = newNodeN("DecList","", $1->lineNo, 3, $1, $2, $3);
 }
 | error COMMA DecList {
-    Node* error_node = newNodeN("Error","", @$.first_line, 0);
-    $$ = newNodeN("DecList","", @$.first_line, 3, error_node, $2, $3);
+
+}
+|Dec error DecList{
+
+}
+|Dec error{
+
 };
 
 Dec : VarDec {
@@ -236,6 +268,9 @@ Dec : VarDec {
 }
 | VarDec ASSIGNOP Exp {
     $$ = newNodeN("Dec","", $1->lineNo, 3, $1, $2, $3);
+}
+|VarDec ASSIGNOP error{
+
 };
 
 Exp : Exp ASSIGNOP Exp {
@@ -292,12 +327,6 @@ Exp : Exp ASSIGNOP Exp {
 | FLOAT {
     $$ = newNodeN("Exp","", $1->lineNo, 1, $1);
 }
-| error {
-
-}
-| Exp error Exp {
-
-}
 | LP error RP {
 
 }
@@ -306,7 +335,38 @@ Exp : Exp ASSIGNOP Exp {
 }
 | Exp LB error RB {
 
-};
+}
+| Exp ASSIGNOP error{
+
+}
+| Exp AND error{
+
+}
+| Exp OR error{
+
+}
+| Exp RELOP error{
+
+}
+| Exp PLUS error{
+
+}
+| Exp MINUS error{
+
+}
+| Exp STAR error{
+
+}
+| Exp DIV error{
+
+}
+| MINUS error{
+
+}
+| NOT error{
+    
+}
+;
 
 Args : Exp COMMA Args {
     $$ = newNodeN("Args","", $1->lineNo, 3, $1, $2, $3);
@@ -314,6 +374,7 @@ Args : Exp COMMA Args {
 | Exp {
     $$ = newNodeN("Args","", $1->lineNo, 1, $1);
 };
+
 %%
 
 
