@@ -28,7 +28,7 @@ void exitScope() {
     }
 }
 
-//外部不要释放type,交给这边统一释放
+//外部不要释放type,且对每一个对象都要创建一个type指针,最后交给symbol中实现的函数统一释放
 Symbol *createVariableSymbol(char *name, Type* type, int line) {
     Symbol *t = malloc(sizeof(Symbol));
 
@@ -42,6 +42,7 @@ Symbol *createVariableSymbol(char *name, Type* type, int line) {
     return t;
 }
 
+//只算函数声明,如果是函数定义,应该直接enterscope,然后把参数插进去
 Symbol *createFunctionSymbol(char *name, Type* return_type, int line, int argNum, Symbol** argList) {
     Symbol *t = malloc(sizeof(Symbol));
 
@@ -78,7 +79,6 @@ Symbol *createStructSymbol(char *name, int line, int symbolNum, Symbol** symbolL
     t->name = malloc(strlen(name) + 1);
     strcpy(t->name, name);
     t->lineno = line;
-
 
     t->info.struct_info.symbolNum = symbolNum;
     if (symbolNum > 0) {
@@ -160,6 +160,7 @@ Symbol *findSymbol(char *name) {
 void insertSymbol(Symbol *sym) {
     Symbol *t = stak[top];
     bool func_redefine_sign = false;
+    error_code = 0;
     
     while (t != NULL) {
         if (strcmp(t->name, sym->name) == 0) {
@@ -212,6 +213,3 @@ bool isInStruct(Symbol *sym, char *name) {
     error_code = 14;
     return false;
 }
-
-
-
