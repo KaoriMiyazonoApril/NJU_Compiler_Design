@@ -58,5 +58,5 @@ void freeSymbol(Symbol *tofree);
 Symbol *findSymbol(char *name);
 void insertSymbol(Symbol *sym);
 
-bool isInStruct(Symbol * sym,char * name);//a.x的x是否在a对应的类里,请传入a对应的类指针
+bool isInStruct(Symbol *sym, char *name); // a.x的x是否在a对应的类里,请传入a对应的类指针
 #endif

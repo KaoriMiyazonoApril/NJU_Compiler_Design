@@ -1,14 +1,10 @@
 #include "Symbol.h"
-#include <cstddef>
-#include <cstdio>
-#include <stdbool.h>
-#include <string.h>
 
 enum {stackSize = 15};
 Symbol * stak[stackSize];
 int top = 0; // 使用栈+链表方式存储symbol(符号)
 
-int error_code = 0;
+int error_code = 0;//作为返回值在遍历树的过程中记得每次都要清零
 
 // 感觉结构体的定义和具体实例上来说还是有点问题
 //enter 仅在进入函数体(声明和结构体都不能)或块时调用
@@ -25,10 +21,11 @@ void exitScope() {
     if (top < 0) {
         exit(-4); // 误用了exit函数,在不在括号的情况下弹出
     }
-    
     freeSymbolStack(top);
     top--;
-    
+    if (top < 0) {
+        exit(-4); // 误用了exit函数,在不在括号的情况下弹出
+    }
 }
 
 //外部不要释放type,交给这边统一释放
@@ -215,3 +212,6 @@ bool isInStruct(Symbol *sym, char *name) {
     error_code = 14;
     return false;
 }
+
+
+
