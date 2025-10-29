@@ -14,9 +14,11 @@ extern char* yytext;
 DIGIT       [0-9]
 LETTER      [a-zA-Z_]
 ID          {LETTER}({LETTER}|{DIGIT})*
-INT_CONST   [+-]?0|[1-9]{DIGIT}*
-FLOAT_CONST [+-]?(({DIGIT}*\.{DIGIT}+)|({DIGIT}+\.{DIGIT}*))([eE][+-]?{DIGIT}+)?
-ERROR       (0({DIGIT}|{LETTER})+)|(.\..\..)
+DEC         0|[1-9]{DIGIT}*
+OCT         0[0-7]+
+HEX         (0x|0X)[0-9a-fA-F]+
+FLOAT       {DIGIT}+\.{DIGIT}+
+ERROR_FLOAT (({DIGIT}*\.{DIGIT}+|{DIGIT}+\.)[eE][+-]?{DIGIT}+)
 %%
 
 "int"               { yylval.node = newNodeN("TYPE", "int", yylineno, 0); return TYPE; }
@@ -27,10 +29,33 @@ ERROR       (0({DIGIT}|{LETTER})+)|(.\..\..)
 "else"              { yylval.node = newNodeN("ELSE", "", yylineno, 0); return ELSE; }
 "while"             { yylval.node = newNodeN("WHILE", "", yylineno, 0); return WHILE; }
 
+{HEX}       { 	if (yylineno != last_error_line) {
+                          last_error_line = yylineno;
+                          lab1_sign = 0;
+                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
+         	}
+		yylval.node = newNodeN("INT", yytext, yylineno, 0); return INT; }
+{OCT}       {   if (yylineno != last_error_line) {
+                          last_error_line = yylineno;
+                          lab1_sign = 0;
+                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
+                }
+		yylval.node = newNodeN("INT", yytext, yylineno, 0); return INT; }
 
-
-{INT_CONST}         { yylval.node = newNodeN("INT", yytext, yylineno, 0); return INT; }
-{FLOAT_CONST}       { 
+{DEC}         { yylval.node = newNodeN("INT", yytext, yylineno, 0); return INT; }
+{ERROR_FLOAT} {if (yylineno != last_error_line) {
+                          last_error_line = yylineno;
+                          lab1_sign = 0;
+                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
+                }
+                      double value = atof(yytext);
+                      char decimal[64];
+                      snprintf(decimal, sizeof(decimal), "%.6f", value);
+                      yylval.node = newNodeN("FLOAT", decimal, yylineno, 0); 
+                      //printf("Lexer: Found FLOAT '%s' at line %d\n", yytext, yylineno);
+                      return FLOAT; 
+              }
+{FLOAT}       { 
                       double value = atof(yytext);
                       char decimal[64];
                       snprintf(decimal, sizeof(decimal), "%.6f", value);
@@ -41,13 +66,26 @@ ERROR       (0({DIGIT}|{LETTER})+)|(.\..\..)
 
 {ID}                { yylval.node = newNodeN("ID", yytext, yylineno, 0); return ID; }
 
-{ERROR}             {if (yylineno != last_error_line) {
-                          last_error_line = yylineno;
-                          lab1_sign = 0;
-                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
-                          }
-                    }
-
+"//"        { int c;
+    while ((c = input()) != '\n' && c != EOF) {
+        // 消耗注释内容，直到换行
+    }
+    if (c == '\n') {
+        yylineno++;  // 遇到换行符，增加行号
+    } }
+"/*"        { int a = input();
+    int b = input();
+    while (!(a == '*' && b == '/')) {
+        if (a == '\n') {
+            yylineno++;  // 遇到换行符，增加行号
+        }
+        a = b;
+        b = input();
+        if (b == EOF) {
+            // 处理未闭合的注释错误
+            break;
+        }
+    } }
 
 "=="    { yylval.node = newNodeN("RELOP", "", yylineno, 0); return RELOP; }
 "!="    { yylval.node = newNodeN("RELOP", "", yylineno, 0); return RELOP; }
@@ -78,27 +116,6 @@ ERROR       (0({DIGIT}|{LETTER})+)|(.\..\..)
 "}"                 { yylval.node = newNodeN("RC", "", yylineno, 0); return RC; }
 
 
-"//".*              {  if (yylineno != last_error_line) {
-                          last_error_line = yylineno;
-                          lab1_sign = 0;
-                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
-                          }
-                    }
-
-
-"/*"                { if (yylineno != last_error_line) {
-                          last_error_line = yylineno;
-                          lab1_sign = 0;
-                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
-                          }
-                    }
-                    
-"*/"                { if (yylineno != last_error_line) {
-                          last_error_line = yylineno;
-                          lab1_sign = 0;
-                          fprintf(stderr, "Error type A at Line %d: Illegal character '%s'\n", yylineno, yytext);
-                          }
-                    }
  
 [ \t\r]+            { /* 忽略空格 */ }
 
