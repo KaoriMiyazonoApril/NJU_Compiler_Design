@@ -13,3 +13,6 @@ CMakeLists.txt
 *.a
 *.lib
 parser
+syntax.tab.*
+syntax.output
+lex.yy.c
