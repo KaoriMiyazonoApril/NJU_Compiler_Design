@@ -14,6 +14,6 @@ typedef struct Type {
 }Type;
 
 bool TypeEqual(Type *a, Type *b);
-bool isLValue(void *exp);          // stub, 语义分析时定义
-Type getType(Node *specifierNode); // stub, 从 Specifier 节点中解析类型
+bool isLValue(Node *exp);          // stub, 语义分析时定义
+Type* getType(Node *specifierNode); // stub, 从 Specifier 节点中解析类型
 #endif
