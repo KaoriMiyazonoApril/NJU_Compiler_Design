@@ -2,7 +2,7 @@
 
 
 %{
-#include "Node/Node.h"
+#include "lab1/Node/Node.h"
 #include "syntax.tab.h"
 
 extern int yylineno,lab1_sign,last_error_line;

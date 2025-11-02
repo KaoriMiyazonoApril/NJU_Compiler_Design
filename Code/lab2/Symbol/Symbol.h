@@ -5,10 +5,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include<stdbool.h> 
-typedef struct Type {
+#include<stdbool.h>
 
-} Type; // 类型部分,先写在这里
+typedef struct Type Type;
 
 typedef struct var {
     Type *type;

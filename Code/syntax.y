@@ -1,7 +1,7 @@
 //author:dcy
 //flex 需要传过来node* 内容的子节点
 %{
-    #include "Node/Node.h"
+    #include "lab1/Node/Node.h"
     #include "lex.yy.c"
     #include "syntax.tab.h"
     extern Node* root;

@@ -1,4 +1,5 @@
 #include "Symbol.h"
+#include "../Type/Type.h"
 
 enum {stackSize = 15};
 Symbol * stak[stackSize];
