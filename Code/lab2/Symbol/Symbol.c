@@ -22,7 +22,8 @@ void exitScope() {
     if (top < 0) {
         exit(-4); // 误用了exit函数,在不在括号的情况下弹出
     }
-    freeSymbolStack(top);
+    // freeSymbolStack(top);
+    stak[top]=NULL;
     top--;
     if (top < 0) {
         exit(-4); // 误用了exit函数,在不在括号的情况下弹出
@@ -203,7 +204,7 @@ void insertSymbol(Symbol *sym) {
 
 bool isInStruct(Symbol *sym, char *name) {
     if (sym->kind != STRUCT_KIND) {
-        exit(-6); // 没有传入类型,而是传入了实例
+        exit(-114); // 没有传入类型,而是传入了实例
     }
 
     for (int i = 0; i < sym->info.struct_info.symbolNum; i++) {

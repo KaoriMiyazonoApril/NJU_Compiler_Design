@@ -1,6 +1,4 @@
 #include"Type.h"
-#include <cstdlib>
-#include <cstring>
 extern int error_code;
 
 bool TypeEqual(Type *a, Type *b) {
@@ -38,53 +36,139 @@ bool isLValue(Node *n) {
     return false;
 }
 
-// 本函数为 int,float,struct和数组类型生成type
 Type *getType(Node *specifier) {
-    Type * ans=NULL;
-    if (!specifier)
-        return NULL;
-    if (specifier->child_count == 0)
-        return NULL;
+    if (!specifier) return NULL;
 
-    Node *first = specifier->children[0];
-
-    if (strcmp(specifier->type, "TYPE") == 0) {
-        ans = malloc(sizeof(Type));
-        if (first->value && strcmp(first->value, "int") == 0)
-            return ans->kind = INT_TYPE, ans;
+    // If passed a "Specifier" node, its child is either TYPE or StructSpecifier
+    Node *node = specifier;
+    if (strcmp(node->type, "Specifier") == 0 && node->child_count >= 1) {
+        node = node->children[0];
+    }
+    
+    if (strcmp(node->type, "TYPE") == 0) {
+        Type *t = malloc(sizeof(Type));
+        if (node->child_count >= 1 && node->children[0] && node->children[0]->value && strcmp(node->children[0]->value, "int") == 0)
+            t->kind = INT_TYPE;
         else
-            return ans->kind = FLOAT_TYPE, ans;
+            t->kind = FLOAT_TYPE;
+        t->base = NULL;
+        t->arrayDim = 0;
+        t->arraySizes = NULL;
+        t->structType = NULL;
+        return t;
     }
 
-    else if (strcmp(first->type, "StructSpecifier") == 0) {
-        //结构体类型
-        ans = malloc(sizeof(Type));
-        ans->kind = STRUCTURE_TYPE;
-        //todo:在遍历的时候把type的指针指向createStructSymbol返回的指针
-        return ans;
-    }
-    //数组类型
-    else if (strcmp(specifier->type,"ParamDec")==0) {
-        ans = malloc(sizeof(Type));
-        ans->kind=ARRAY_TYPE;
-        ans->base = getType(specifier->children[0]);
-        int arrayDim = 0;
-        Node *tv = first;
-        
-        while (tv->child_count == 4) {
-            arrayDim++;
-            tv = tv->children[0];
-        }
-        ans->arrayDim = arrayDim;
-        ans->arraySizes = malloc(arrayDim * sizeof(int));
-        tv = first;
+    if (strcmp(node->type, "StructSpecifier") == 0) {
+        // node forms: STRUCT OptTag LC DefList RC  (definition)
+        // or STRUCT Tag (reference)
+        if (node->child_count == 5) {
+            Node *optTag = node->children[1];
+            Node *defList = node->children[3];
+            char *structName = NULL;
+            if (optTag && optTag->child_count == 1)
+                structName = optTag->children[0]->value;
 
-        while(tv->child_count == 4) {
-            int size = atoi(tv->children[2]->value);
-            ans->arraySizes[--arrayDim] = size;
-            tv = tv->children[0];
+            // collect members
+            int memberCount = 0;
+            Node *curDefList = defList;
+            while (curDefList && curDefList->child_count > 0) {
+                Node *def = curDefList->children[0];
+                Node *decList = def->children[1];
+                Node *curDecList = decList;
+                while (curDecList && curDecList->child_count > 0) {
+                    memberCount++;
+                    if (curDecList->child_count == 3)
+                        curDecList = curDecList->children[2];
+                    else
+                        break;
+                }
+                if (curDefList->child_count == 2)
+                    curDefList = curDefList->children[1];
+                else
+                    break;
+            }
+
+            Symbol **members = memberCount > 0 ? malloc(sizeof(Symbol *) * memberCount) : NULL;
+            int idx = 0;
+            curDefList = defList;
+            while (curDefList && curDefList->child_count > 0) {
+                Node *def = curDefList->children[0];
+                // specifier for field
+                Node *fieldSpec = def->children[0];
+                Node *decList = def->children[1];
+                Node *curDecList = decList;
+                while (curDecList && curDecList->child_count > 0) {
+                    Node *dec = curDecList->children[0];
+                    Node *varDec = dec->children[0];
+                    // field name node
+                    Node *idNode = varDec->children[0];
+                    char *fieldName = idNode->value;
+                    int line = idNode->lineNo;
+                    // base type for field
+                    Type *baseType = getType(fieldSpec);
+                    Type *finalType = baseType;
+                    Node *curVar = varDec;
+                    while (curVar && curVar->child_count == 4) {
+                        Type *arr = malloc(sizeof(Type));
+                        arr->kind = ARRAY_TYPE;
+                        arr->base = finalType;
+                        arr->arrayDim = 1;
+                        arr->arraySizes = malloc(sizeof(int));
+                        arr->arraySizes[0] = atoi(curVar->children[2]->value);
+                        arr->structType = NULL;
+                        finalType = arr;
+                        curVar = curVar->children[0];
+                    }
+                    members[idx++] = createVariableSymbol(fieldName, finalType, line);
+                    if (curDecList->child_count == 3)
+                        curDecList = curDecList->children[2];
+                    else
+                        break;
+                }
+                if (curDefList->child_count == 2)
+                    curDefList = curDefList->children[1];
+                else
+                    break;
+            }
+
+            Symbol *structSym = createStructSymbol(structName ? structName : "", node->lineNo, memberCount, members);
+            if (structName) {
+                Symbol *exist = findSymbol(structName);
+                if (!exist) {
+                    insertSymbol(structSym);
+                } else {
+                    // leave error handling to caller; createStructSymbol may set error_code
+                }
+            }
+            Type *ret = malloc(sizeof(Type));
+            ret->kind = STRUCTURE_TYPE;
+            ret->structType = structSym;
+            ret->base = NULL;
+            ret->arrayDim = 0;
+            ret->arraySizes = NULL;
+            return ret;
         }
-        
+        // reference: STRUCT Tag
+        else if (node->child_count == 2) {
+            Node *tag = node->children[1];
+            if (!tag || tag->child_count == 0) {
+                error_code = 17; // undefined struct
+                return NULL;
+            }
+            char *structName = tag->children[0]->value;
+            Symbol *structSym = findSymbol(structName);
+            if (!structSym || structSym->kind != STRUCT_KIND) {
+                error_code = 17;
+                return NULL;
+            }
+            Type *ret = malloc(sizeof(Type));
+            ret->kind = STRUCTURE_TYPE;
+            ret->structType = structSym;
+            ret->base = NULL;
+            ret->arrayDim = 0;
+            ret->arraySizes = NULL;
+            return ret;
+        }
     }
-    return ans;
+    return NULL;
 }

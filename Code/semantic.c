@@ -1,3 +1,591 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include "lab2/Symbol/Symbol.h"
+#include "lab2/Type/Type.h"
 #include "semantic.h"
 
+extern int error_code;
 
+// 错误输出
+void printError(int type, int line, const char *msg) {
+    printf("Error type %d at Line %d: %s.\n", type, line, msg);
+}
+
+// ==================== 主入口 ====================
+void semanticAnalysis(Node *root) {
+    if (!root)
+        return;
+    enterScope();
+    traverseProgram(root);
+    exitScope();
+}
+
+// ==================== Program/ExtDefList/ExtDef ====================
+void traverseProgram(Node *node) {
+    if (!node || node->child_count == 0)
+        return;
+    traverseExtDefList(node->children[0]);
+}
+
+void traverseExtDefList(Node *node) {
+    if (!node || node->child_count == 0)
+        return;
+    traverseExtDef(node->children[0]);
+    if (node->child_count == 2)
+        traverseExtDefList(node->children[1]);
+}
+
+void traverseExtDef(Node *node) {
+    if (!node || node->child_count == 0)
+        return;
+    Node *specifier = node->children[0];
+    Type *baseType = getType(specifier);
+
+    // 结构体定义
+    if (node->child_count == 2 && strcmp(specifier->children[0]->type, "StructSpecifier") == 0) {
+        handleStructSpecifier(specifier->children[0]);
+    }
+    // 全局变量声明
+    else if (node->child_count == 3 && strcmp(node->children[1]->type, "ExtDecList") == 0) {
+        traverseExtDecList(node->children[1], baseType);
+    }
+    // 函数定义
+    else if (node->child_count == 3 && strcmp(node->children[1]->type, "FunDec") == 0) {
+        handleFuncDef(node->children[1], baseType, node->children[2]);
+    }
+}
+
+// ==================== ExtDecList/Def/DecList ====================
+void traverseExtDecList(Node *node, Type *baseType) {
+    if (!node || node->child_count == 0)
+        return;
+    Node *varDec = node->children[0];
+    Node *idNode = varDec->children[0];
+    char *varName = idNode->value;
+    int line = idNode->lineNo;
+
+    // 检查变量重定义/与结构体名冲突
+    Symbol *exist = findSymbol(varName);
+    if (exist && exist->kind == VAR_KIND) {
+        printError(3, line, "Redefined variable");
+    } else if (exist && exist->kind == STRUCT_KIND) {
+        printError(3, line, "Variable name conflicts with struct name");
+    } else {
+        // 处理数组类型
+        Type *finalType = baseType;
+        Node *cur = varDec;
+        while (cur->child_count == 4) {
+            Type *arr = malloc(sizeof(Type));
+            arr->kind = ARRAY_TYPE;
+            arr->base = finalType;
+            arr->arrayDim = 1;
+            arr->arraySizes = malloc(sizeof(int));
+            arr->arraySizes[0] = atoi(cur->children[2]->value);
+            arr->structType = NULL;
+            finalType = arr;
+            cur = cur->children[0];
+        }
+        Symbol *varSym = createVariableSymbol(varName, finalType, line);
+        insertSymbol(varSym);
+        if (error_code != 0)
+            printError(error_code, line, "Variable insert error");
+    }
+    if (node->child_count == 3)
+        traverseExtDecList(node->children[2], baseType);
+}
+
+void traverseDefList(Node *node) {
+    if (!node || node->child_count == 0)
+        return;
+    traverseDef(node->children[0]);
+    if (node->child_count == 2)
+        traverseDefList(node->children[1]);
+}
+
+void traverseDef(Node *node) {
+    if (!node || node->child_count < 3)
+        return;
+    Type *baseType = getType(node->children[0]);
+    traverseDecList(node->children[1], baseType);
+}
+
+void traverseDecList(Node *node, Type *baseType) {
+    if (!node || node->child_count == 0)
+        return;
+    Node *dec = node->children[0];
+    Node *varDec = dec->children[0];
+    Node *idNode = varDec->children[0];
+    char *varName = idNode->value;
+    int line = idNode->lineNo;
+    
+    Symbol *exist = findSymbol(varName);
+    if (exist && exist->kind == VAR_KIND) {
+        printError(3, line, "Redefined variable");
+    } else if (exist && exist->kind == STRUCT_KIND) {
+        printError(3, line, "Variable name conflicts with struct name");
+    } else {
+        // 处理数组类型
+        Type *finalType = baseType;
+        Node *cur = varDec;
+        while (cur->child_count == 4) {
+            Type *arr = malloc(sizeof(Type));
+            arr->kind = ARRAY_TYPE;
+            arr->base = finalType;
+            arr->arrayDim = 1;
+            arr->arraySizes = malloc(sizeof(int));
+            arr->arraySizes[0] = atoi(cur->children[2]->value);
+            arr->structType = NULL;
+            finalType = arr;
+            cur = cur->children[0];
+        }
+        Symbol *varSym = createVariableSymbol(varName, finalType, line);
+        insertSymbol(varSym);
+        if (error_code != 0)
+            printError(error_code, line, "Variable insert error");
+    }
+    // 检查初始化类型
+    if (dec->child_count == 3) {
+        Type *expType = checkExp(dec->children[2]);
+        if (!TypeEqual(baseType, expType)) {
+            printError(5, line, "Type mismatched for assignment");
+        }
+    }
+    if (node->child_count == 3)
+        traverseDecList(node->children[2], baseType);
+}
+
+// ==================== 结构体处理 ====================
+Type *handleStructSpecifier(Node *node) {
+    if (!node)
+        return NULL;
+    // STRUCT OptTag LC DefList RC
+    if (node->child_count == 5) {
+        Node *optTag = node->children[1];
+        Node *defList = node->children[3];
+        char *structName = NULL;
+        if (optTag && optTag->child_count == 1)
+            structName = optTag->children[0]->value;
+
+        // 收集成员
+        int memberCount = 0;
+        Node *curDefList = defList;
+        while (curDefList && curDefList->child_count > 0) {
+            Node *def = curDefList->children[0];
+            Node *decList = def->children[1];
+            Node *curDecList = decList;
+            while (curDecList && curDecList->child_count > 0) {
+                memberCount++;
+                if (curDecList->child_count == 3)
+                    curDecList = curDecList->children[2];
+                else
+                    break;
+            }
+            if (curDefList->child_count == 2)
+                curDefList = curDefList->children[1];
+            else
+                break;
+        }
+        Symbol **members = memberCount > 0 ? malloc(sizeof(Symbol *) * memberCount) : NULL;
+        int idx = 0;
+        curDefList = defList;
+        while (curDefList && curDefList->child_count > 0) {
+            Node *def = curDefList->children[0];
+            Type *baseType = getType(def->children[0]);
+            Node *decList = def->children[1];
+            Node *curDecList = decList;
+            while (curDecList && curDecList->child_count > 0) {
+                Node *dec = curDecList->children[0];
+                Node *varDec = dec->children[0];
+                Node *idNode = varDec->children[0];
+                char *fieldName = idNode->value;
+                int line = idNode->lineNo;
+                // 域名重复
+                for (int j = 0; j < idx; j++)
+                    if (strcmp(members[j]->name, fieldName) == 0)
+                        printError(15, line, "Duplicate field name in struct");
+                // 域初始化
+                if (dec->child_count == 3)
+                    printError(15, line, "Struct field initialized");
+                // 处理数组
+                Type *finalType = baseType;
+                Node *curVar = varDec;
+                while (curVar->child_count == 4) {
+                    Type *arr = malloc(sizeof(Type));
+                    arr->kind = ARRAY_TYPE;
+                    arr->base = finalType;
+                    arr->arrayDim = 1;
+                    arr->arraySizes = malloc(sizeof(int));
+                    arr->arraySizes[0] = atoi(curVar->children[2]->value);
+                    arr->structType = NULL;
+                    finalType = arr;
+                    curVar = curVar->children[0];
+                }
+                members[idx++] = createVariableSymbol(fieldName, finalType, line);
+                if (curDecList->child_count == 3)
+                    curDecList = curDecList->children[2];
+                else
+                    break;
+            }
+            if (curDefList->child_count == 2)
+                curDefList = curDefList->children[1];
+            else
+                break;
+        }
+        Symbol *structSym = createStructSymbol(structName ? structName : "", node->lineNo, memberCount, members);
+        if (structName) {
+            Symbol *exist = findSymbol(structName);
+            if (exist)
+                printError(16, node->lineNo, "Struct name redefined");
+            else
+                insertSymbol(structSym);
+        }
+        Type *retType = malloc(sizeof(Type));
+        retType->kind = STRUCTURE_TYPE;
+        retType->structType = structSym;
+        retType->base = NULL;
+        retType->arrayDim = 0;
+        retType->arraySizes = NULL;
+        return retType;
+    }
+    // STRUCT Tag
+    else if (node->child_count == 2) {
+        Node *tag = node->children[1];
+        char *structName = tag->children[0]->value;
+        Symbol *structSym = findSymbol(structName);
+        if (!structSym || structSym->kind != STRUCT_KIND) {
+            printError(17, node->lineNo, "Undefined struct used");
+            return NULL;
+        }
+        Type *retType = malloc(sizeof(Type));
+        retType->kind = STRUCTURE_TYPE;
+        retType->structType = structSym;
+        retType->base = NULL;
+        retType->arrayDim = 0;
+        retType->arraySizes = NULL;
+        return retType;
+    }
+    return NULL;
+}
+
+// ==================== 函数定义 ====================
+void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
+    if (!funDec)
+        return;
+    char *funcName = funDec->children[0]->value;
+    int line = funDec->children[0]->lineNo;
+    int argNum = 0;
+    Symbol **argList = NULL;
+    if (funDec->child_count == 4) {
+        Node *varList = funDec->children[2];
+        Node *curVarList = varList;
+        while (curVarList && curVarList->child_count > 0) {
+            argNum++;
+            if (curVarList->child_count == 3)
+                curVarList = curVarList->children[2];
+            else
+                break;
+        }
+        argList = argNum > 0 ? malloc(sizeof(Symbol *) * argNum) : NULL;
+        int idx = 0;
+        curVarList = varList;
+        while (curVarList && curVarList->child_count > 0) {
+            Node *paramDec = curVarList->children[0];
+            Type *paramType = getType(paramDec->children[0]);
+            Node *varDec = paramDec->children[1];
+            Node *idNode = varDec->children[0];
+            char *paramName = idNode->value;
+            int paramLine = idNode->lineNo;
+            // 处理数组
+            Type *finalType = paramType;
+            Node *curVar = varDec;
+            while (curVar->child_count == 4) {
+                Type *arr = malloc(sizeof(Type));
+                arr->kind = ARRAY_TYPE;
+                arr->base = finalType;
+                arr->arrayDim = 1;
+                arr->arraySizes = malloc(sizeof(int));
+                arr->arraySizes[0] = atoi(curVar->children[2]->value);
+                arr->structType = NULL;
+                finalType = arr;
+                curVar = curVar->children[0];
+            }
+            argList[idx++] = createVariableSymbol(paramName, finalType, paramLine);
+            if (curVarList->child_count == 3)
+                curVarList = curVarList->children[2];
+            else
+                break;
+        }
+    }
+    Symbol *funcSym = createFunctionSymbol(funcName, retType, line, argNum, argList);
+    if (error_code == 3) {
+        printError(3, line, "Function parameter name redefined");
+        return;
+    }
+    Symbol *exist = findSymbol(funcName);
+    if (exist && exist->kind == FUNC_KIND) {
+        if (exist->info.func_info.isDefined) {
+            printError(4, line, "Function redefined");
+            return;
+        } else {
+            // 检查声明和定义一致
+            if (exist->info.func_info.argNum != funcSym->info.func_info.argNum ||
+                !TypeEqual(exist->info.func_info.return_type, funcSym->info.func_info.return_type)) {
+                printError(19, line, "Function declaration and definition mismatch");
+                return;
+            }
+            for (int i = 0; i < funcSym->info.func_info.argNum; i++) {
+                if (!TypeEqual(exist->info.func_info.arg_list[i]->info.var_info.type,
+                              funcSym->info.func_info.arg_list[i]->info.var_info.type)) {
+                    printError(19, line, "Function parameter type mismatch");
+                }
+            }
+            exist->info.func_info.isDefined = true;
+        }
+    } else {
+        funcSym->info.func_info.isDefined = true;
+        insertSymbol(funcSym);
+        if (error_code != 0)
+            printError(error_code, line, "Function insert error");
+    }
+    enterScope();
+    for (int i = 0; i < argNum; i++) {
+        insertSymbol(argList[i]);
+        if (error_code != 0)
+            printError(error_code, argList[i]->lineno, "Function parameter insert error");
+    }
+    traverseCompSt(compSt, retType);
+    exitScope();
+}
+
+// ==================== 语句块/语句 ====================
+void traverseCompSt(Node *node, Type *retType) {
+    if (!node || node->child_count < 4)
+        return;
+    Node *defList = node->children[1];
+    Node *stmtList = node->children[2];
+    traverseDefList(defList);
+    traverseStmtList(stmtList, retType);
+}
+
+void traverseStmtList(Node *node, Type *retType) {
+    if (!node || node->child_count == 0)
+        return;
+    traverseStmt(node->children[0], retType);
+    if (node->child_count == 2)
+        traverseStmtList(node->children[1], retType);
+}
+
+void traverseStmt(Node *node, Type *retType) {
+    if (!node || node->child_count == 0)
+        return;
+    Node *first = node->children[0];
+    if (strcmp(first->type, "Exp") == 0) {
+        checkExp(first);
+    } else if (strcmp(first->type, "CompSt") == 0) {
+        traverseCompSt(first, retType);
+    } else if (strcmp(first->type, "RETURN") == 0) {
+        Type *expType = checkExp(node->children[1]);
+        if (!TypeEqual(retType, expType))
+            printError(8, node->children[0]->lineNo, "Type mismatched for return");
+    } else if (strcmp(first->type, "IF") == 0) {
+        checkExp(node->children[2]);
+        traverseStmt(node->children[4], retType);
+        if (node->child_count == 7)
+            traverseStmt(node->children[6], retType);
+    } else if (strcmp(first->type, "WHILE") == 0) {
+        checkExp(node->children[2]);
+        traverseStmt(node->children[4], retType);
+    }
+}
+
+// ==================== 表达式检查 ====================
+Type *checkExp(Node *exp) {
+    if (!exp || exp->child_count == 0)
+        return NULL;
+    Node *c = exp->children[0];
+    // ID
+    if (strcmp(c->type, "ID") == 0 && exp->child_count == 1) {
+        Symbol *sym = findSymbol(c->value);
+        if (!sym) {
+            printError(1, c->lineNo, "Undefined variable");
+            return NULL;
+        }
+        if (sym->kind == VAR_KIND)
+            return sym->info.var_info.type;
+        if (sym->kind == STRUCT_KIND) {
+            printError(1, c->lineNo, "Struct name used as variable");
+            return NULL;
+        }
+        if (sym->kind == FUNC_KIND) {
+            printError(11, c->lineNo, "Function name used as variable");
+            return NULL;
+        }
+    }
+    // INT
+    if (strcmp(c->type, "INT") == 0) {
+        Type *t = malloc(sizeof(Type));
+        t->kind = INT_TYPE;
+        t->base = NULL;
+        t->arrayDim = 0;
+        t->arraySizes = NULL;
+        t->structType = NULL;
+        return t;
+    }
+    // FLOAT
+    if (strcmp(c->type, "FLOAT") == 0) {
+        Type *t = malloc(sizeof(Type));
+        t->kind = FLOAT_TYPE;
+        t->base = NULL;
+        t->arrayDim = 0;
+        t->arraySizes = NULL;
+        t->structType = NULL;
+        return t;
+    }
+    // 赋值
+    if (exp->child_count == 3 && strcmp(exp->children[1]->type, "ASSIGNOP") == 0) {
+        Type *left = checkExp(exp->children[0]);
+        Type *right = checkExp(exp->children[2]);
+        if (!isLValue(exp->children[0]))
+            printError(6, exp->children[0]->lineNo, "The left-hand side of an assignment must be a variable");
+        if (!TypeEqual(left, right))
+            printError(5, exp->children[0]->lineNo, "Type mismatched for assignment");
+        return left;
+    }
+    // 算术运算
+    if (exp->child_count == 3 &&
+        (strcmp(exp->children[1]->type, "PLUS") == 0 ||
+         strcmp(exp->children[1]->type, "MINUS") == 0 ||
+         strcmp(exp->children[1]->type, "STAR") == 0 ||
+         strcmp(exp->children[1]->type, "DIV") == 0)) {
+        Type *left = checkExp(exp->children[0]);
+        Type *right = checkExp(exp->children[2]);
+        if (!left || !right)
+            return NULL;
+        if (left->kind != INT_TYPE && left->kind != FLOAT_TYPE)
+            printError(7, exp->children[0]->lineNo, "Operand type mismatched for arithmetic");
+        if (right->kind != INT_TYPE && right->kind != FLOAT_TYPE)
+            printError(7, exp->children[2]->lineNo, "Operand type mismatched for arithmetic");
+        if (!TypeEqual(left, right))
+            printError(7, exp->children[1]->lineNo, "Operand type mismatched for arithmetic");
+        return left;
+    }
+    // 逻辑运算
+    if (exp->child_count == 3 &&
+        (strcmp(exp->children[1]->type, "AND") == 0 ||
+         strcmp(exp->children[1]->type, "OR") == 0 ||
+         strcmp(exp->children[1]->type, "RELOP") == 0)) {
+        Type *left = checkExp(exp->children[0]);
+        Type *right = checkExp(exp->children[2]);
+        if (!left || !right)
+            return NULL;
+        if (left->kind != INT_TYPE && left->kind != FLOAT_TYPE)
+            printError(7, exp->children[0]->lineNo, "Operand type mismatched for logic");
+        if (right->kind != INT_TYPE && right->kind != FLOAT_TYPE)
+            printError(7, exp->children[2]->lineNo, "Operand type mismatched for logic");
+        return left;
+    }
+    // LP Exp RP
+    if (exp->child_count == 3 && strcmp(c->type, "LP") == 0)
+        return checkExp(exp->children[1]);
+    // MINUS/NOT
+    if (exp->child_count == 2 &&
+        (strcmp(c->type, "MINUS") == 0 || strcmp(c->type, "NOT") == 0)) {
+        Type *t = checkExp(exp->children[1]);
+        if (!t)
+            return NULL;
+        if (t->kind != INT_TYPE && t->kind != FLOAT_TYPE)
+            printError(7, exp->children[1]->lineNo, "Operand type mismatched for unary");
+        return t;
+    }
+    // 函数调用
+    if (exp->child_count >= 3 && strcmp(c->type, "ID") == 0 &&
+        strcmp(exp->children[1]->type, "LP") == 0) {
+        Symbol *sym = findSymbol(c->value);
+        if (!sym) {
+            printError(2, c->lineNo, "Undefined function");
+            return NULL;
+        }
+        if (sym->kind != FUNC_KIND) {
+            printError(11, c->lineNo, "Not a function");
+            return NULL;
+        }
+        if (!sym->info.func_info.isDefined)
+            printError(2, c->lineNo, "Function declared but not defined");
+        int expectedArgNum = sym->info.func_info.argNum;
+        if (exp->child_count == 4) { // 有参数
+            Node *argsNode = exp->children[2];
+            int actualArgNum = 0;
+            Node *cur = argsNode;
+            while (cur && cur->child_count > 0) {
+                actualArgNum++;
+                if (cur->child_count == 3)
+                    cur = cur->children[2];
+                else
+                    break;
+            }
+            if (actualArgNum != expectedArgNum)
+                printError(9, c->lineNo, "Function argument number mismatch");
+            else {
+                cur = argsNode;
+                int idx = 0;
+                while (cur && cur->child_count > 0 && idx < expectedArgNum) {
+                    Type *argType = checkExp(cur->children[0]);
+                    Type *paramType = sym->info.func_info.arg_list[idx]->info.var_info.type;
+                    if (!TypeEqual(argType, paramType))
+                        printError(9, c->lineNo, "Function argument type mismatch");
+                    idx++;
+                    if (cur->child_count == 3)
+                        cur = cur->children[2];
+                    else
+                        break;
+                }
+            }
+        } else {
+            if (expectedArgNum != 0)
+                printError(9, c->lineNo, "Function argument number mismatch");
+        }
+        return sym->info.func_info.return_type;
+    }
+    // 数组访问
+    if (exp->child_count == 4 && strcmp(exp->children[1]->type, "LB") == 0) {
+        Type *arrType = checkExp(exp->children[0]);
+        Type *idxType = checkExp(exp->children[2]);
+        if (!arrType)
+            return NULL;
+        if (arrType->kind != ARRAY_TYPE)
+            printError(10, exp->children[0]->lineNo, "Not an array");
+        if (!idxType || idxType->kind != INT_TYPE)
+            printError(12, exp->children[2]->lineNo, "Array index is not integer");
+        return arrType->base;
+    }
+    // 结构体成员访问
+    if (exp->child_count == 3 && strcmp(exp->children[1]->type, "DOT") == 0) {
+        Type *structType = checkExp(exp->children[0]);
+        if (!structType || structType->kind != STRUCTURE_TYPE) {
+            printError(13, exp->children[0]->lineNo, "Not a struct");
+            return NULL;
+        }
+        Symbol *field = getStructField(structType->structType, exp->children[2]->value);
+        if (!field) {
+            printError(14, exp->children[2]->lineNo, "Struct field not found");
+            return NULL;
+        }
+        return field->info.var_info.type;
+    }
+    return NULL;
+}
+
+Symbol *getStructField(Symbol *structSym, char *fieldName) {
+    if (structSym == NULL || structSym->kind != STRUCT_KIND)
+        return NULL;
+    for (int i = 0; i < structSym->info.struct_info.symbolNum; i++) {
+        Symbol *field = structSym->info.struct_info.symbol_list[i];
+        if (strcmp(field->name, fieldName) == 0) {
+            return field;
+        }
+    }
+    
+    return NULL;
+}

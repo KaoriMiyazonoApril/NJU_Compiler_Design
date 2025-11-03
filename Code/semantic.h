@@ -15,22 +15,21 @@
  */
 void semanticAnalysis(Node *root);
 
-/// ==================== 内部函数声明（可选暴露） ====================
-// 如果你希望把这些函数仅限semantic.c内部使用，可以在.c中用static修饰，这里可以不写
+// 前向声明
 void traverseProgram(Node *node);
 void traverseExtDefList(Node *node);
 void traverseExtDef(Node *node);
-void traverseExtDecList(Node *node, Type type);
-void handleFunctionDef(Node *funDec, Type returnType, Node *compSt);
-void traverseCompSt(Node *node, Type returnType);
+void traverseExtDecList(Node *node, Type *baseType);
+void handleFuncDef(Node *funDec, Type *retType, Node *compSt);
+void traverseCompSt(Node *node, Type *retType);
 void traverseDefList(Node *node);
 void traverseDef(Node *node);
-void traverseDecList(Node *node, Type type);
-void traverseStmtList(Node *node, Type returnType);
-void traverseStmt(Node *node, Type returnType);
-Type checkExpression(Node *exp);
-Type handleStructDef(Node *node);
-Type checkStructVariable(Node *varDec, Type baseType);
-void semanticError(int type, int line, const char *msg);
-
+void traverseDecList(Node *node, Type *baseType);
+void traverseStmtList(Node *node, Type *retType);
+void traverseStmt(Node *node, Type *retType);
+Type *checkExp(Node *exp);
+Type *handleStructSpecifier(Node *node);
+void insertFuncParams(Node *funDec);
+bool checkFuncCall(Symbol *funcSym, Node *argsNode, int line);
+Symbol *getStructField(Symbol *structSym, char *fieldName);
 #endif
