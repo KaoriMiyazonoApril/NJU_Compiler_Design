@@ -73,32 +73,26 @@ void traverseExtDecList(Node *node, Type *baseType) {
     char *varName = idNode->value;
     int line = idNode->lineNo;
 
-    // 检查变量重定义/与结构体名冲突
-    Symbol *exist = findSymbol(varName);
-    if (exist && exist->kind == VAR_KIND) {
-        printError(3, line, "Redefined variable");
-    } else if (exist && exist->kind == STRUCT_KIND) {
-        printError(3, line, "Variable name conflicts with struct name");
-    } else {
-        // 处理数组类型
-        Type *finalType = baseType;
-        Node *cur = varDec;
-        while (cur->child_count == 4) {
-            Type *arr = malloc(sizeof(Type));
-            arr->kind = ARRAY_TYPE;
-            arr->base = finalType;
-            arr->arrayDim = 1;
-            arr->arraySizes = malloc(sizeof(int));
-            arr->arraySizes[0] = atoi(cur->children[2]->value);
-            arr->structType = NULL;
-            finalType = arr;
-            cur = cur->children[0];
-        }
-        Symbol *varSym = createVariableSymbol(varName, finalType, line);
-        insertSymbol(varSym);
-        if (error_code != 0)
-            printError(error_code, line, "Variable insert error");
+    // 处理数组类型
+    Type *finalType = baseType;
+    Node *cur = varDec;
+    while (cur->child_count == 4) {
+        Type *arr = malloc(sizeof(Type));
+        arr->kind = ARRAY_TYPE;
+        arr->base = finalType;
+        arr->arrayDim = 1;
+        arr->arraySizes = malloc(sizeof(int));
+        arr->arraySizes[0] = atoi(cur->children[2]->value);
+        arr->structType = NULL;
+        finalType = arr;
+        cur = cur->children[0];
     }
+
+    Symbol *varSym = createVariableSymbol(varName, finalType, line);
+    insertSymbol(varSym);
+    if (error_code != 0)
+        printError(error_code, line, "Variable insert error");
+
     if (node->child_count == 3)
         traverseExtDecList(node->children[2], baseType);
 }
@@ -131,40 +125,33 @@ void traverseDecList(Node *node, Type *baseType) {
     }
 
     if (strcmp(idNode->type, "ID") != 0) {
-        // printf("DEBUG: 错误：无法找到变量名节点，节点类型为 '%s'\n", idNode->type);
         return;
     }
 
     char *varName = idNode->value;
     int line = idNode->lineNo;
 
-    // printf("DEBUG: 处理变量定义 '%s' 在第 %d 行\n", varName, line);
-
-    Symbol *exist = findSymbol(varName);
-    if (exist && exist->kind == VAR_KIND) {
-        printError(3, line, "Redefined variable");
-    } else if (exist && exist->kind == STRUCT_KIND) {
-        printError(3, line, "Variable name conflicts with struct name");
-    } else {
-        // 处理数组类型
-        Type *finalType = baseType;
-        Node *cur = varDec;
-        while (cur->child_count == 4) {
-            Type *arr = malloc(sizeof(Type));
-            arr->kind = ARRAY_TYPE;
-            arr->base = finalType;
-            arr->arrayDim = 1;
-            arr->arraySizes = malloc(sizeof(int));
-            arr->arraySizes[0] = atoi(cur->children[2]->value);
-            arr->structType = NULL;
-            finalType = arr;
-            cur = cur->children[0];
-        }
-        Symbol *varSym = createVariableSymbol(varName, finalType, line);
-        insertSymbol(varSym);
-        if (error_code != 0)
-            printError(error_code, line, "Variable insert error");
+    // 处理数组类型
+    Type *finalType = baseType;
+    Node *cur = varDec;
+    while (cur->child_count == 4) {
+        Type *arr = malloc(sizeof(Type));
+        arr->kind = ARRAY_TYPE;
+        arr->base = finalType;
+        arr->arrayDim = 1;
+        arr->arraySizes = malloc(sizeof(int));
+        arr->arraySizes[0] = atoi(cur->children[2]->value);
+        arr->structType = NULL;
+        finalType = arr;
+        cur = cur->children[0];
     }
+
+    Symbol *varSym = createVariableSymbol(varName, finalType, line);
+    insertSymbol(varSym);
+    if (error_code != 0) {
+        printError(error_code, line, "Variable insert error");
+    }
+
     // 检查初始化类型
     if (dec->child_count == 3) {
         Type *expType = checkExp(dec->children[2]);
@@ -420,26 +407,36 @@ void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
         if (error_code != 0)
             printError(error_code, line, "Function insert error");
     }
+    /* 函数体处理：先进入作用域，再插入参数符号，然后处理函数体内部
+       不通过 traverseCompSt（避免双重 enter），而是直接处理 DefList 和 StmtList */
     enterScope();
-    // printf("DEBUG: 进入函数作用域，当前栈顶 = %d\n", top);
     for (int i = 0; i < argNum; i++) {
         insertSymbol(argList[i]);
         if (error_code != 0)
             printError(error_code, argList[i]->lineno, "Function parameter insert error");
     }
-    traverseCompSt(compSt, retType);
+    // 直接处理函数体的 DefList 和 StmtList，不调用 traverseCompSt（避免双重作用域）
+    if (compSt && compSt->child_count >= 3) {
+        Node *defList = compSt->children[1];
+        Node *stmtList = compSt->children[2];
+        traverseDefList(defList);
+        traverseStmtList(stmtList, retType);
+    }
     exitScope();
-    // printf("DEBUG: 退出函数作用域，当前栈顶 = %d\n", top);
 }
 
 // ==================== 语句块/语句 ====================
 void traverseCompSt(Node *node, Type *retType) {
     if (!node || node->child_count < 4)
         return;
+    // 通用复合语句：进入新的作用域 -> 处理内容 -> 退出作用域
+    // 调试输出以验证 enter/exit 是否被调用（遇到问题时可删除）
+    enterScope();
     Node *defList = node->children[1];
     Node *stmtList = node->children[2];
     traverseDefList(defList);
     traverseStmtList(stmtList, retType);
+    exitScope();
 }
 
 void traverseStmtList(Node *node, Type *retType) {
@@ -457,6 +454,7 @@ void traverseStmt(Node *node, Type *retType) {
     if (strcmp(first->type, "Exp") == 0) {
         checkExp(first);
     } else if (strcmp(first->type, "CompSt") == 0) {
+        // debug: entering nested CompSt
         traverseCompSt(first, retType);
     } else if (strcmp(first->type, "RETURN") == 0) {
         Type *expType = checkExp(node->children[1]);
@@ -671,4 +669,18 @@ Symbol *getStructField(Symbol *structSym, char *fieldName) {
     }
 
     return NULL;
+}
+
+// ==================== 资源释放 ====================
+void freeSemanticResource(void) {
+    extern int top;
+    extern Symbol *stak[];
+
+    // exitScope 已经在每次调用时释放了对应层的符号
+    // 这里只需要确保所有作用域都被清理
+    // 如果 top >= 0，说明还有未退出的作用域，需要手动清理
+    while (top >= 0) {
+        freeSymbolStack(top);
+        top--;
+    }
 }

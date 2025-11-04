@@ -15,6 +15,11 @@
  */
 void semanticAnalysis(Node *root);
 
+/**
+ * 释放语义分析的所有资源
+ */
+void freeSemanticResource(void);
+
 // 前向声明
 void traverseProgram(Node *node);
 void traverseExtDefList(Node *node);

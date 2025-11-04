@@ -1,6 +1,11 @@
 int main()
 {
-    int i=3;
-    j=i+1;
-    int j;
+    int c;
+    if(1>0){
+        int c=7;
+    }
+    
+}
+int m(int t){
+    t=3;
 }

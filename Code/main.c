@@ -4,15 +4,16 @@
 
 #include "lab1/Node/Node.h" //这里面包含了一些标准头文件,include上总没错
 #include "syntax.tab.h"
-#include"semantic.h"
+#include "semantic.h"
 extern Node *root;
 extern void yyrestart(FILE *input_file);
 extern int lab1_sign;
 
-int main(int argc, char **argv){
-    if (argc <= 1) return 1;
+int main(int argc, char **argv) {
+    if (argc <= 1)
+        return 1;
     FILE *f = fopen(argv[1], "r");
-    if (!f){
+    if (!f) {
         perror(argv[1]);
         return 1;
     }
@@ -21,10 +22,11 @@ int main(int argc, char **argv){
     yyparse();
 
     if (lab1_sign) {
-        //printTree(root, 0);
-        traverseProgram(root);
+        // printTree(root, 0);
+        semanticAnalysis(root);
     }
-        
+
     freeTree(root);
+    freeSemanticResource();
     return 0;
 }
