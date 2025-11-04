@@ -163,7 +163,8 @@ void insertSymbol(Symbol *sym) {
     Symbol *t = stak[top];
     bool func_redefine_sign = false;
     error_code = 0;
-    
+    //printf("insert symbol: %s\n", sym->name);
+
     while (t != NULL) {
         if (strcmp(t->name, sym->name) == 0) {
             if (sym->kind==VAR_KIND) {

@@ -62,7 +62,14 @@ void traverseExtDecList(Node *node, Type *baseType) {
     if (!node || node->child_count == 0)
         return;
     Node *varDec = node->children[0];
-    Node *idNode = varDec->children[0];
+    // 递归查找 ID 节点，兼容多维数组 VarDec 嵌套结构
+    Node *idNode = varDec;
+    while (idNode->child_count > 0 && strcmp(idNode->type, "ID") != 0) {
+        idNode = idNode->children[0];
+    }
+    if (!idNode || strcmp(idNode->type, "ID") != 0) {
+        return;
+    }
     char *varName = idNode->value;
     int line = idNode->lineNo;
 
@@ -116,23 +123,22 @@ void traverseDecList(Node *node, Type *baseType) {
         return;
     Node *dec = node->children[0];
     Node *varDec = dec->children[0];
-    
+
     // 修正：递归查找ID节点，处理数组变量的嵌套结构
     Node *idNode = varDec;
     while (idNode->child_count > 0 && strcmp(idNode->type, "ID") != 0) {
         idNode = idNode->children[0];
     }
-    
+
     if (strcmp(idNode->type, "ID") != 0) {
-        //printf("DEBUG: 错误：无法找到变量名节点，节点类型为 '%s'\n", idNode->type);
+        // printf("DEBUG: 错误：无法找到变量名节点，节点类型为 '%s'\n", idNode->type);
         return;
     }
-    
+
     char *varName = idNode->value;
     int line = idNode->lineNo;
 
-    //printf("DEBUG: 处理变量定义 '%s' 在第 %d 行\n", varName, line);
-
+    // printf("DEBUG: 处理变量定义 '%s' 在第 %d 行\n", varName, line);
 
     Symbol *exist = findSymbol(varName);
     if (exist && exist->kind == VAR_KIND) {
@@ -212,7 +218,19 @@ Type *handleStructSpecifier(Node *node) {
             while (curDecList && curDecList->child_count > 0) {
                 Node *dec = curDecList->children[0];
                 Node *varDec = dec->children[0];
-                Node *idNode = varDec->children[0];
+                // 递归查找 ID 节点，兼容数组成员声明
+                Node *idNode = varDec;
+                while (idNode->child_count > 0 && strcmp(idNode->type, "ID") != 0) {
+                    idNode = idNode->children[0];
+                }
+                if (!idNode || strcmp(idNode->type, "ID") != 0) {
+                    // 无法找到字段名，跳过
+                    if (curDecList->child_count == 3)
+                        curDecList = curDecList->children[2];
+                    else
+                        break;
+                    continue;
+                }
                 char *fieldName = idNode->value;
                 int line = idNode->lineNo;
                 // 域名重复
@@ -230,7 +248,7 @@ Type *handleStructSpecifier(Node *node) {
                         curDecList = curDecList->children[2];
                     else
                         break;
-                    continue;  // 跳过后续处理
+                    continue; // 跳过后续处理
                 }
                 // 域初始化
                 if (dec->child_count == 3)
@@ -262,21 +280,21 @@ Type *handleStructSpecifier(Node *node) {
         }
         Symbol *structSym = createStructSymbol(structName ? structName : "", node->lineNo, memberCount, members);
         // 添加调试代码
-        //printf("DEBUG: createStructSymbol returned %p, error_code=%d\n", (void*)structSym, error_code);
+        // printf("DEBUG: createStructSymbol returned %p, error_code=%d\n", (void*)structSym, error_code);
         if (structSym == NULL) {
-            //printf("DEBUG: createStructSymbol failed, likely due to duplicate members\n");
-            // 如果创建结构体符号失败（可能是因为重复成员），直接返回NULL
+            // printf("DEBUG: createStructSymbol failed, likely due to duplicate members\n");
+            //  如果创建结构体符号失败（可能是因为重复成员），直接返回NULL
             return NULL;
         }
         if (structName) {
             Symbol *exist = findSymbol(structName);
             // 添加调试代码
-            //printf("DEBUG: Checking struct redefinition for '%s' at line %d\n", structName, node->lineNo);
+            // printf("DEBUG: Checking struct redefinition for '%s' at line %d\n", structName, node->lineNo);
             if (exist) {
-                //printf("DEBUG: Struct '%s' already exists, kind=%d\n", structName, exist->kind);
+                // printf("DEBUG: Struct '%s' already exists, kind=%d\n", structName, exist->kind);
                 printError(16, node->lineNo, "Struct name redefined");
             } else {
-                //printf("DEBUG: Inserting new struct '%s'\n", structName);
+                // printf("DEBUG: Inserting new struct '%s'\n", structName);
                 insertSymbol(structSym);
             }
         }
@@ -295,7 +313,7 @@ Type *handleStructSpecifier(Node *node) {
         Symbol *structSym = findSymbol(structName);
         if (!structSym || structSym->kind != STRUCT_KIND) {
             printError(17, node->lineNo, "Undefined struct used");
-return NULL;
+            return NULL;
         }
         Type *retType = malloc(sizeof(Type));
         retType->kind = STRUCTURE_TYPE;
@@ -314,7 +332,7 @@ void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
         return;
     char *funcName = funDec->children[0]->value;
     int line = funDec->children[0]->lineNo;
-    //printf("DEBUG: 处理函数定义 '%s' 在第 %d 行\n", funcName, line);
+    // printf("DEBUG: 处理函数定义 '%s' 在第 %d 行\n", funcName, line);
 
     int argNum = 0;
     Symbol **argList = NULL;
@@ -335,7 +353,19 @@ void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
             Node *paramDec = curVarList->children[0];
             Type *paramType = getType(paramDec->children[0]);
             Node *varDec = paramDec->children[1];
-            Node *idNode = varDec->children[0];
+            // 递归查找参数名的 ID 节点，兼容数组参数
+            Node *idNode = varDec;
+            while (idNode->child_count > 0 && strcmp(idNode->type, "ID") != 0) {
+                idNode = idNode->children[0];
+            }
+            if (!idNode || strcmp(idNode->type, "ID") != 0) {
+                // 无法找到参数名，跳过此参数
+                if (curVarList->child_count == 3)
+                    curVarList = curVarList->children[2];
+                else
+                    break;
+                continue;
+            }
             char *paramName = idNode->value;
             int paramLine = idNode->lineNo;
             // 处理数组
@@ -378,7 +408,7 @@ void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
             }
             for (int i = 0; i < funcSym->info.func_info.argNum; i++) {
                 if (!TypeEqual(exist->info.func_info.arg_list[i]->info.var_info.type,
-                              funcSym->info.func_info.arg_list[i]->info.var_info.type)) {
+                               funcSym->info.func_info.arg_list[i]->info.var_info.type)) {
                     printError(19, line, "Function parameter type mismatch");
                 }
             }
@@ -391,7 +421,7 @@ void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
             printError(error_code, line, "Function insert error");
     }
     enterScope();
-    //printf("DEBUG: 进入函数作用域，当前栈顶 = %d\n", top);
+    // printf("DEBUG: 进入函数作用域，当前栈顶 = %d\n", top);
     for (int i = 0; i < argNum; i++) {
         insertSymbol(argList[i]);
         if (error_code != 0)
@@ -399,7 +429,7 @@ void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
     }
     traverseCompSt(compSt, retType);
     exitScope();
-    //printf("DEBUG: 退出函数作用域，当前栈顶 = %d\n", top);
+    // printf("DEBUG: 退出函数作用域，当前栈顶 = %d\n", top);
 }
 
 // ==================== 语句块/语句 ====================
@@ -450,7 +480,7 @@ Type *checkExp(Node *exp) {
     Node *c = exp->children[0];
     // ID
     if (strcmp(c->type, "ID") == 0 && exp->child_count == 1) {
-        //printf("DEBUG: 检查ID节点 '%s' 在第 %d 行\n", c->value, c->lineNo);
+        // printf("DEBUG: 检查ID节点 '%s' 在第 %d 行\n", c->value, c->lineNo);
         Symbol *sym = findSymbol(c->value);
         if (!sym) {
             printError(1, c->lineNo, "Undefined variable");
@@ -596,7 +626,10 @@ Type *checkExp(Node *exp) {
     if (exp->child_count == 4 && strcmp(exp->children[1]->type, "LB") == 0) {
         Type *arrType = checkExp(exp->children[0]);
         Type *idxType = checkExp(exp->children[2]);
-        
+
+        if (!idxType || idxType->kind != INT_TYPE)
+            printError(12, exp->children[2]->lineNo, "Array index is not integer");
+
         // 先检查数组变量是否存在
         if (!arrType) {
             // 数组变量不存在，但仍然检查索引类型
@@ -604,11 +637,10 @@ Type *checkExp(Node *exp) {
                 printError(12, exp->children[2]->lineNo, "Array index is not integer");
             return NULL;
         }
-        
+
         if (arrType->kind != ARRAY_TYPE)
             printError(10, exp->children[0]->lineNo, "Not an array");
-        if (!idxType || idxType->kind != INT_TYPE)
-            printError(12, exp->children[2]->lineNo, "Array index is not integer");
+
         return arrType->base;
     }
     // 结构体成员访问
@@ -637,6 +669,6 @@ Symbol *getStructField(Symbol *structSym, char *fieldName) {
             return field;
         }
     }
-    
+
     return NULL;
 }

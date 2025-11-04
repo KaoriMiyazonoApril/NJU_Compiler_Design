@@ -21,7 +21,7 @@ int main(int argc, char **argv){
     yyparse();
 
     if (lab1_sign) {
-        // printTree(root, 0);
+        //printTree(root, 0);
         traverseProgram(root);
     }
         
