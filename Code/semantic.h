@@ -32,4 +32,7 @@ Type *handleStructSpecifier(Node *node);
 void insertFuncParams(Node *funDec);
 bool checkFuncCall(Symbol *funcSym, Node *argsNode, int line);
 Symbol *getStructField(Symbol *structSym, char *fieldName);
+
+// 添加printError函数的前向声明
+void printError(int type, int line, const char *msg);
 #endif

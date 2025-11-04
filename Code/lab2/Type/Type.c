@@ -1,10 +1,14 @@
 #include"Type.h"
+#include"../../semantic.h"
 extern int error_code;
 
 bool TypeEqual(Type *a, Type *b) {
+    if(a==NULL&&b==NULL)
+        return true;
     if (a == NULL || b == NULL) {
         return false;
     }
+    //printf("a->kind = %d, b->kind = %d\n", a->kind, b->kind);
     if (a->kind != b->kind) {
         return false;
     }
@@ -15,7 +19,7 @@ bool TypeEqual(Type *a, Type *b) {
         case ARRAY_TYPE:
             return TypeEqual(a->base, b->base) && (a->arrayDim == b->arrayDim);
         case STRUCTURE_TYPE:
-            return a->structType == b->structType;
+            return StructEqual(a->structType, b->structType);
         default:
             return false;
     }
@@ -47,7 +51,8 @@ Type *getType(Node *specifier) {
     
     if (strcmp(node->type, "TYPE") == 0) {
         Type *t = malloc(sizeof(Type));
-        if (node->child_count >= 1 && node->children[0] && node->children[0]->value && strcmp(node->children[0]->value, "int") == 0)
+        // 修复：直接检查node->value而不是node->children[0]->value
+        if (node->value && strcmp(node->value, "int") == 0)
             t->kind = INT_TYPE;
         else
             t->kind = FLOAT_TYPE;
@@ -132,14 +137,19 @@ Type *getType(Node *specifier) {
             }
 
             Symbol *structSym = createStructSymbol(structName ? structName : "", node->lineNo, memberCount, members);
-            if (structName) {
-                Symbol *exist = findSymbol(structName);
-                if (!exist) {
-                    insertSymbol(structSym);
-                } else {
-                    // leave error handling to caller; createStructSymbol may set error_code
-                }
+            if (structSym == NULL) {
+                // 释放已分配的members数组内存
+                if (members) free(members);
+                return NULL;
             }
+            //if (structName) {
+                //Symbol *exist = findSymbol(structName);
+                //if (!exist) {
+                 //   insertSymbol(structSym);
+                //} else {
+                    // leave error handling to caller; createStructSymbol may set error_code
+                //}
+            //}
             Type *ret = malloc(sizeof(Type));
             ret->kind = STRUCTURE_TYPE;
             ret->structType = structSym;
@@ -153,12 +163,14 @@ Type *getType(Node *specifier) {
             Node *tag = node->children[1];
             if (!tag || tag->child_count == 0) {
                 error_code = 17; // undefined struct
+                printError(17, node->lineNo, "Undefined struct used");
                 return NULL;
             }
             char *structName = tag->children[0]->value;
             Symbol *structSym = findSymbol(structName);
             if (!structSym || structSym->kind != STRUCT_KIND) {
                 error_code = 17;
+                printError(17, node->lineNo, "Undefined struct used");
                 return NULL;
             }
             Type *ret = malloc(sizeof(Type));
@@ -171,4 +183,32 @@ Type *getType(Node *specifier) {
         }
     }
     return NULL;
+}
+
+bool StructEqual(Symbol *a, Symbol *b) {
+    if(a->kind!=STRUCT_KIND||b->kind!=STRUCT_KIND)
+        exit(-79);//找错了
+
+    if(a->info.struct_info.symbolNum != b->info.struct_info.symbolNum)
+        return false;
+    for (int i = 0; i < a->info.struct_info.symbolNum; i++) {
+        if(a->info.struct_info.symbol_list[i]->kind!= b->info.struct_info.symbol_list[i]->kind)
+            return false;
+        switch (a->info.struct_info.symbol_list[i]->kind) {
+            case VAR_KIND: {
+                Type *typeA = a->info.struct_info.symbol_list[i]->info.var_info.type;
+                Type *typeB = b->info.struct_info.symbol_list[i]->info.var_info.type;
+                if (!TypeEqual(typeA, typeB))
+                    return false;
+                break;
+            }
+            case STRUCT_KIND:
+                if (!StructEqual(a->info.struct_info.symbol_list[i], b->info.struct_info.symbol_list[i]))
+                    return false;
+                break;
+            default:
+                exit(-80); // 结构体内出现非变量成员
+        }
+    }
+    return true;
 }
