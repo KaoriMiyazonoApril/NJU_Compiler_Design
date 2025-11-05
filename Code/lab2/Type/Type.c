@@ -1,29 +1,29 @@
-#include"Type.h"
-#include"../../semantic.h"
+#include "Type.h"
+#include "../../semantic.h"
 extern int error_code;
 
 bool TypeEqual(Type *a, Type *b) {
-    if(a==NULL&&b==NULL)
+    if (a == NULL && b == NULL)
         return true;
     if (a == NULL || b == NULL) {
         return false;
     }
-    //printf("a->kind = %d, b->kind = %d\n", a->kind, b->kind);
+    // printf("a->kind = %d, b->kind = %d\n", a->kind, b->kind);
     if (a->kind != b->kind) {
         return false;
     }
     switch (a->kind) {
-        case INT_TYPE:
-        case FLOAT_TYPE:
-            return true;
-        case ARRAY_TYPE:
-            return TypeEqual(a->base, b->base) && (a->arrayDim == b->arrayDim);
-        case STRUCTURE_TYPE:
-            // 名等价：仅当两者引用同一结构体符号时相等（包括同名同符号）。
-            // 对匿名结构体而言，不同定义即使结构相同也不相等。
-            return a->structType == b->structType;
-        default:
-            return false;
+    case INT_TYPE:
+    case FLOAT_TYPE:
+        return true;
+    case ARRAY_TYPE:
+        return TypeEqual(a->base, b->base) && (a->arrayDim == b->arrayDim);
+    case STRUCTURE_TYPE:
+        // 名等价：仅当两者引用同一结构体符号时相等（包括同名同符号）。
+        // 对匿名结构体而言，不同定义即使结构相同也不相等。
+        return a->structType == b->structType;
+    default:
+        return false;
     }
 }
 
@@ -43,14 +43,15 @@ bool isLValue(Node *n) {
 }
 
 Type *getType(Node *specifier) {
-    if (!specifier) return NULL;
+    if (!specifier)
+        return NULL;
 
     // If passed a "Specifier" node, its child is either TYPE or StructSpecifier
     Node *node = specifier;
     if (strcmp(node->type, "Specifier") == 0 && node->child_count >= 1) {
         node = node->children[0];
     }
-    
+
     if (strcmp(node->type, "TYPE") == 0) {
         Type *t = malloc(sizeof(Type));
         // 修复：直接检查node->value而不是node->children[0]->value
@@ -141,16 +142,17 @@ Type *getType(Node *specifier) {
             Symbol *structSym = createStructSymbol(structName ? structName : "", node->lineNo, memberCount, members);
             if (structSym == NULL) {
                 // 释放已分配的members数组内存
-                if (members) free(members);
+                if (members)
+                    free(members);
                 return NULL;
             }
-            //if (structName) {
-                //Symbol *exist = findSymbol(structName);
-                //if (!exist) {
-                 //   insertSymbol(structSym);
-                //} else {
-                    // leave error handling to caller; createStructSymbol may set error_code
-                //}
+            // if (structName) {
+            // Symbol *exist = findSymbol(structName);
+            // if (!exist) {
+            //    insertSymbol(structSym);
+            //} else {
+            // leave error handling to caller; createStructSymbol may set error_code
+            //}
             //}
             Type *ret = malloc(sizeof(Type));
             ret->kind = STRUCTURE_TYPE;
@@ -188,28 +190,28 @@ Type *getType(Node *specifier) {
 }
 
 bool StructEqual(Symbol *a, Symbol *b) {
-    if(a->kind!=STRUCT_KIND||b->kind!=STRUCT_KIND)
-        exit(-79);//找错了
+    if (a->kind != STRUCT_KIND || b->kind != STRUCT_KIND)
+        exit(-79); // 找错了
 
-    if(a->info.struct_info.symbolNum != b->info.struct_info.symbolNum)
+    if (a->info.struct_info.symbolNum != b->info.struct_info.symbolNum)
         return false;
     for (int i = 0; i < a->info.struct_info.symbolNum; i++) {
-        if(a->info.struct_info.symbol_list[i]->kind!= b->info.struct_info.symbol_list[i]->kind)
+        if (a->info.struct_info.symbol_list[i]->kind != b->info.struct_info.symbol_list[i]->kind)
             return false;
         switch (a->info.struct_info.symbol_list[i]->kind) {
-            case VAR_KIND: {
-                Type *typeA = a->info.struct_info.symbol_list[i]->info.var_info.type;
-                Type *typeB = b->info.struct_info.symbol_list[i]->info.var_info.type;
-                if (!TypeEqual(typeA, typeB))
-                    return false;
-                break;
-            }
-            case STRUCT_KIND:
-                if (!StructEqual(a->info.struct_info.symbol_list[i], b->info.struct_info.symbol_list[i]))
-                    return false;
-                break;
-            default:
-                exit(-80); // 结构体内出现非变量成员
+        case VAR_KIND: {
+            Type *typeA = a->info.struct_info.symbol_list[i]->info.var_info.type;
+            Type *typeB = b->info.struct_info.symbol_list[i]->info.var_info.type;
+            if (!TypeEqual(typeA, typeB))
+                return false;
+            break;
+        }
+        case STRUCT_KIND:
+            if (!StructEqual(a->info.struct_info.symbol_list[i], b->info.struct_info.symbol_list[i]))
+                return false;
+            break;
+        default:
+            exit(-80); // 结构体内出现非变量成员
         }
     }
     return true;
