@@ -19,7 +19,9 @@ bool TypeEqual(Type *a, Type *b) {
         case ARRAY_TYPE:
             return TypeEqual(a->base, b->base) && (a->arrayDim == b->arrayDim);
         case STRUCTURE_TYPE:
-            return StructEqual(a->structType, b->structType);
+            // 名等价：仅当两者引用同一结构体符号时相等（包括同名同符号）。
+            // 对匿名结构体而言，不同定义即使结构相同也不相等。
+            return a->structType == b->structType;
         default:
             return false;
     }
