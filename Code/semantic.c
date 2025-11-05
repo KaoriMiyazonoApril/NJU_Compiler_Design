@@ -43,12 +43,17 @@ void traverseExtDef(Node *node) {
     Node *specifier = node->children[0];
     Type *baseType = getType(specifier);
 
-    // 结构体定义
-    if (node->child_count == 2 && strcmp(specifier->children[0]->type, "StructSpecifier") == 0) {
+    // 结构体定义（仅 Specifier 无变量实例）
+    if (node->child_count == 2 && specifier->child_count > 0 && strcmp(specifier->children[0]->type, "StructSpecifier") == 0) {
         handleStructSpecifier(specifier->children[0]);
     }
-    // 全局变量声明
+    // 全局变量声明（Specifier + ExtDecList + SEMI）
     else if (node->child_count == 3 && strcmp(node->children[1]->type, "ExtDecList") == 0) {
+        // 首先处理 specifier 中可能的 struct 定义
+        if (specifier->child_count > 0 && strcmp(specifier->children[0]->type, "StructSpecifier") == 0) {
+            handleStructSpecifier(specifier->children[0]);
+        }
+        // 然后处理变量声明
         traverseExtDecList(node->children[1], baseType);
     }
     // 函数定义
@@ -88,10 +93,16 @@ void traverseExtDecList(Node *node, Type *baseType) {
         cur = cur->children[0];
     }
 
-    Symbol *varSym = createVariableSymbol(varName, finalType, line);
-    insertSymbol(varSym);
-    if (error_code != 0)
-        printError(error_code, line, "Variable insert error");
+    // 检查变量名是否与结构体名重复
+    Symbol *existing = findSymbol(varName);
+    if (existing && existing->kind == STRUCT_KIND) {
+        printError(3, line, "Variable name conflicts with struct name");
+    } else {
+        Symbol *varSym = createVariableSymbol(varName, finalType, line);
+        insertSymbol(varSym);
+        if (error_code != 0)
+            printError(error_code, line, "Variable insert error");
+    }
 
     if (node->child_count == 3)
         traverseExtDecList(node->children[2], baseType);
@@ -109,6 +120,11 @@ void traverseDef(Node *node) {
     if (!node || node->child_count < 3)
         return;
     Type *baseType = getType(node->children[0]);
+    // 在处理 DecList 之前，先处理可能的 struct 定义
+    Node *specifier = node->children[0];
+    if (specifier->child_count > 0 && strcmp(specifier->children[0]->type, "StructSpecifier") == 0) {
+        handleStructSpecifier(specifier->children[0]);
+    }
     traverseDecList(node->children[1], baseType);
 }
 
@@ -146,16 +162,22 @@ void traverseDecList(Node *node, Type *baseType) {
         cur = cur->children[0];
     }
 
-    Symbol *varSym = createVariableSymbol(varName, finalType, line);
-    insertSymbol(varSym);
-    if (error_code != 0) {
-        printError(error_code, line, "Variable insert error");
+    // 检查变量名是否与结构体名重复
+    Symbol *existing = findSymbol(varName);
+    if (existing && existing->kind == STRUCT_KIND) {
+        printError(3, line, "Variable name conflicts with struct name");
+    } else {
+        Symbol *varSym = createVariableSymbol(varName, finalType, line);
+        insertSymbol(varSym);
+        if (error_code != 0) {
+            printError(error_code, line, "Variable insert error");
+        }
     }
 
     // 检查初始化类型
     if (dec->child_count == 3) {
         Type *expType = checkExp(dec->children[2]);
-        if (!TypeEqual(baseType, expType)) {
+        if (!TypeEqual(finalType, expType)) {
             printError(5, line, "Type mismatched for assignment");
         }
     }
@@ -199,7 +221,17 @@ Type *handleStructSpecifier(Node *node) {
         curDefList = defList;
         while (curDefList && curDefList->child_count > 0) {
             Node *def = curDefList->children[0];
-            Type *baseType = getType(def->children[0]);
+            // 字段的基本类型：当字段的 Specifier 是 StructSpecifier（可能包含命名的嵌套结构体定义）时，
+            // 走 handleStructSpecifier，确保执行结构体名重定义检查（Error 16）并进行必要的插入；
+            // 否则走常规 getType。
+            Type *baseType = NULL;
+            Node *fieldSpecifier = def->children[0]; // 这是一个 Specifier
+            if (fieldSpecifier && fieldSpecifier->child_count > 0 &&
+                strcmp(fieldSpecifier->children[0]->type, "StructSpecifier") == 0) {
+                baseType = handleStructSpecifier(fieldSpecifier->children[0]);
+            } else {
+                baseType = getType(fieldSpecifier);
+            }
             Node *decList = def->children[1];
             Node *curDecList = decList;
             while (curDecList && curDecList->child_count > 0) {
@@ -265,7 +297,8 @@ Type *handleStructSpecifier(Node *node) {
             else
                 break;
         }
-        Symbol *structSym = createStructSymbol(structName ? structName : "", node->lineNo, memberCount, members);
+        // 使用实际添加的成员数量 idx，而不是初始的 memberCount
+        Symbol *structSym = createStructSymbol(structName ? structName : "", node->lineNo, idx, members);
         // 添加调试代码
         // printf("DEBUG: createStructSymbol returned %p, error_code=%d\n", (void*)structSym, error_code);
         if (structSym == NULL) {
@@ -411,9 +444,15 @@ void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
        不通过 traverseCompSt（避免双重 enter），而是直接处理 DefList 和 StmtList */
     enterScope();
     for (int i = 0; i < argNum; i++) {
-        insertSymbol(argList[i]);
-        if (error_code != 0)
-            printError(error_code, argList[i]->lineno, "Function parameter insert error");
+        // 检查参数名是否与结构体名冲突
+        Symbol *existing = findSymbol(argList[i]->name);
+        if (existing && existing->kind == STRUCT_KIND) {
+            printError(3, argList[i]->lineno, "Variable name conflicts with struct name");
+        } else {
+            insertSymbol(argList[i]);
+            if (error_code != 0)
+                printError(error_code, argList[i]->lineno, "Function parameter insert error");
+        }
     }
     // 直接处理函数体的 DefList 和 StmtList，不调用 traverseCompSt（避免双重作用域）
     if (compSt && compSt->child_count >= 3) {
@@ -625,17 +664,16 @@ Type *checkExp(Node *exp) {
         Type *arrType = checkExp(exp->children[0]);
         Type *idxType = checkExp(exp->children[2]);
 
+        // 检查数组索引类型
         if (!idxType || idxType->kind != INT_TYPE)
             printError(12, exp->children[2]->lineNo, "Array index is not integer");
 
-        // 先检查数组变量是否存在
+        // 如果数组变量不存在，返回NULL
         if (!arrType) {
-            // 数组变量不存在，但仍然检查索引类型
-            if (!idxType || idxType->kind != INT_TYPE)
-                printError(12, exp->children[2]->lineNo, "Array index is not integer");
             return NULL;
         }
 
+        // 检查是否真的是数组类型
         if (arrType->kind != ARRAY_TYPE)
             printError(10, exp->children[0]->lineNo, "Not an array");
 
