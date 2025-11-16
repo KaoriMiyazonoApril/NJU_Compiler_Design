@@ -1,9 +1,11 @@
 #ifndef INTER_H
 #define INTER_H
-#include "lab1/Node/Node.h"
+#include "../../lab1/Node/Node.h"
+#include "../../lab2/Type/Type.h"
 #include "semantic.h"
 
 typedef Node *pNode;
+typedef Type *pType
 typedef struct operand *pOperand;
 typedef struct interCode *pInterCode;
 typedef struct interCodes *pInterCodes;
