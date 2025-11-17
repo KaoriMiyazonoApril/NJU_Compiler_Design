@@ -88,6 +88,7 @@ extern pInterCodeList interCodeList;
 pOperand newOperand(OperandKind kind, ...);
 void deleteOperand(pOperand p);
 void setOperand(pOperand p, OperandKind kind, void *val);
+void op_print(FILE *fp, const char *fmt, ...);
 void printOp(FILE *fp, pOperand op);
 
 // InterCode
