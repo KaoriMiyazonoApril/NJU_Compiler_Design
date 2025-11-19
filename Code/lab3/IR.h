@@ -89,7 +89,9 @@ pOperand newOperand(OperandKind kind, ...);
 void deleteOperand(pOperand p);
 void setOperand(pOperand p, OperandKind kind, void *val);
 void op_print(FILE *fp, const char *fmt, ...);
+//工具函数
 void printOp(FILE *fp, pOperand op);
+char *newString(char *src);
 
 // InterCode
 pInterCode newInterCode(InterCodeKind kind, ...);
