@@ -37,7 +37,7 @@
 %nonassoc RELOP
 %left PLUS MINUS
 %left STAR DIV
-%right NOT
+%right NOT UMINUS
 %left DOT
 %left LB RB
 %left LP RP

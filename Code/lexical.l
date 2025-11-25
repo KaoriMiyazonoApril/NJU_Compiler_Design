@@ -87,12 +87,12 @@ ERROR_FLOAT (({DIGIT}*\.{DIGIT}+|{DIGIT}+\.)[eE][+-]?{DIGIT}+)
         }
     } }
 
-"=="    { yylval.node = newNodeN("RELOP", "", yylineno, 0); return RELOP; }
-"!="    { yylval.node = newNodeN("RELOP", "", yylineno, 0); return RELOP; }
-">="    { yylval.node = newNodeN("RELOP", "", yylineno, 0); return RELOP; }
-"<="    { yylval.node = newNodeN("RELOP", "", yylineno, 0); return RELOP; }
-">"     { yylval.node = newNodeN("RELOP", "", yylineno, 0); return RELOP; }
-"<"     { yylval.node = newNodeN("RELOP", "", yylineno, 0); return RELOP; }
+"=="    { yylval.node = newNodeN("RELOP", "==", yylineno, 0); return RELOP; }
+"!="    { yylval.node = newNodeN("RELOP", "!=", yylineno, 0); return RELOP; }
+">="    { yylval.node = newNodeN("RELOP", ">=", yylineno, 0); return RELOP; }
+"<="    { yylval.node = newNodeN("RELOP", "<=", yylineno, 0); return RELOP; }
+">"     { yylval.node = newNodeN("RELOP", ">", yylineno, 0); return RELOP; }
+"<"     { yylval.node = newNodeN("RELOP", "<", yylineno, 0); return RELOP; }
 
 "="                 { yylval.node = newNodeN("ASSIGNOP", "", yylineno, 0); return ASSIGNOP; }
 "+"                 { yylval.node = newNodeN("PLUS", "", yylineno, 0); return PLUS; }

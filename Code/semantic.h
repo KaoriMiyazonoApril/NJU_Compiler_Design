@@ -12,8 +12,9 @@
 /**
  * 对语法树进行语义分析
  * @param root 语法树根节点
+ * @return 是否成功翻译（true表示成功，false表示不支持该代码）
  */
-void semanticAnalysis(Node *root);
+bool semanticAnalysis(Node *root);
 
 /**
  * 释放语义分析的所有资源

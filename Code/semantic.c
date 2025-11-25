@@ -1,10 +1,350 @@
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include "lab2/Symbol/Symbol.h"
 #include "lab2/Type/Type.h"
+#include "lab3/IR.h"
 #include "semantic.h"
+
+// Track current function's parameters for array handling
+static char *currentFuncParamList[128];
+static int currentFuncParamCount = 0;
+
+// Track arrays that have been assigned a pointer value (e.g., b = a)
+// These should be treated as pointers, not local arrays
+static char *pointerizedArrayList[128];
+static int pointerizedArrayCount = 0;
+
+static void markArrayAsPointerized(const char *name) {
+    // Check if already marked
+    for (int i = 0; i < pointerizedArrayCount; i++) {
+        if (strcmp(pointerizedArrayList[i], name) == 0) {
+            return;
+        }
+    }
+    if (pointerizedArrayCount < 128) {
+        pointerizedArrayList[pointerizedArrayCount] = strdup(name);
+        pointerizedArrayCount++;
+    }
+}
+
+static bool isPointerizedArray(const char *name) {
+    for (int i = 0; i < pointerizedArrayCount; i++) {
+        if (strcmp(pointerizedArrayList[i], name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void clearPointerizedArrays(void) {
+    for (int i = 0; i < pointerizedArrayCount; i++) {
+        free(pointerizedArrayList[i]);
+    }
+    pointerizedArrayCount = 0;
+}
+
+static void insertBuiltinFunctions(void);
+static Type *createPrimitiveType(TypeKind kind);
+static Type *buildArrayType(Node *varDecNode, Type *baseType);
+static char *extractVarName(Node *varDecNode);
+static char *getLeftValueName(Node *expNode);
+static void translateExpNode(Node *node, pOperand place);
+static void translateCondNode(Node *node, pOperand labelTrue, pOperand labelFalse);
+static void translateArgsNode(Node *node);
+static InterCodeKind getBinaryOpKind(const char *typeName);
+static bool astContainsStructUsage(Node *node);
+static bool hasStructTypeVariable(void);
+
+// ==================== 辅助函数 ====================
+static bool isParameterArrayName(const char *name) {
+    for (int i = 0; i < currentFuncParamCount; i++) {
+        if (strcmp(currentFuncParamList[i], name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static Type *buildArrayType(Node *varDecNode, Type *baseType) {
+    Type *finalType = baseType;
+    Node *cur = varDecNode;
+    while (cur->child_count == 4) {
+        Type *arr = malloc(sizeof(Type));
+        arr->kind = ARRAY_TYPE;
+        arr->base = finalType;
+        arr->arrayDim = 1;
+        arr->arraySizes = malloc(sizeof(int));
+        arr->arraySizes[0] = atoi(cur->children[2]->value);
+        arr->structType = NULL;
+        finalType = arr;
+        cur = cur->children[0];
+    }
+    return finalType;
+}
+
+static char *extractVarName(Node *varDecNode) {
+    Node *cur = varDecNode;
+    while (cur && cur->child_count > 0 && strcmp(cur->type, "ID") != 0) cur = cur->children[0];
+    return (cur && strcmp(cur->type, "ID") == 0) ? cur->value : NULL;
+}
+
+static char *getLeftValueName(Node *expNode) {
+    return (expNode && expNode->child_count == 1 && strcmp(expNode->children[0]->type, "ID") == 0) ? expNode->children[0]->value : NULL;
+}
+
+static InterCodeKind getBinaryOpKind(const char *typeName) {
+    if (strcmp(typeName, "PLUS") == 0)
+        return IR_ADD;
+    if (strcmp(typeName, "MINUS") == 0)
+        return IR_SUB;
+    if (strcmp(typeName, "STAR") == 0)
+        return IR_MUL;
+    if (strcmp(typeName, "DIV") == 0)
+        return IR_DIV;
+    return IR_ADD;
+}
+
+/* Try to evaluate constant expressions at compile time.
+   Returns true if expression is a constant, sets *value to the result.
+   This uses C standard integer semantics (truncate towards zero for division). */
+static bool evalConstExp(Node *exp, int *value) {
+    if (!exp)
+        return false;
+
+    // Handle expression wrapped in parentheses (Exp) - pass through
+    if (exp->child_count == 1 && strcmp(exp->children[0]->type, "Exp") != 0 && strcmp(exp->children[0]->type, "INT") != 0) {
+        // This might be a parenthesized expression
+        return evalConstExp(exp->children[0], value);
+    }
+
+    // Leaf: integer constant
+    if (exp->child_count == 1 && strcmp(exp->children[0]->type, "INT") == 0) {
+        *value = atoi(exp->children[0]->value);
+        return true;
+    }
+
+    // Unary minus: MINUS Exp
+    if (exp->child_count == 2 && strcmp(exp->children[0]->type, "MINUS") == 0) {
+        int val;
+        if (evalConstExp(exp->children[1], &val)) {
+            *value = -val;
+            return true;
+        }
+        return false;
+    }
+
+    // Unary NOT: NOT Exp
+    if (exp->child_count == 2 && strcmp(exp->children[0]->type, "NOT") == 0) {
+        int val;
+        if (evalConstExp(exp->children[1], &val)) {
+            *value = val ? 0 : 1;
+            return true;
+        }
+        return false;
+    }
+
+    // Binary operations
+    if (exp->child_count == 3) {
+        int left, right;
+        if (!evalConstExp(exp->children[0], &left))
+            return false;
+        if (!evalConstExp(exp->children[2], &right))
+            return false;
+
+        const char *op = exp->children[1]->type;
+        if (strcmp(op, "PLUS") == 0) {
+            *value = left + right;
+            return true;
+        } else if (strcmp(op, "MINUS") == 0) {
+            *value = left - right;
+            return true;
+        } else if (strcmp(op, "STAR") == 0) {
+            *value = left * right;
+            return true;
+        } else if (strcmp(op, "DIV") == 0) {
+            if (right == 0)
+                return false; // Division by zero
+            // C standard: truncate towards zero
+            *value = left / right;
+            return true;
+        } else if (strcmp(op, "RELOP") == 0) {
+            // Handle relational operators
+            const char *relop = exp->children[1]->value;
+            if (strcmp(relop, "<") == 0)
+                *value = left < right;
+            else if (strcmp(relop, ">") == 0)
+                *value = left > right;
+            else if (strcmp(relop, "<=") == 0)
+                *value = left <= right;
+            else if (strcmp(relop, ">=") == 0)
+                *value = left >= right;
+            else if (strcmp(relop, "==") == 0)
+                *value = left == right;
+            else if (strcmp(relop, "!=") == 0)
+                *value = left != right;
+            else
+                return false;
+            return true;
+        } else if (strcmp(op, "AND") == 0) {
+            *value = left && right;
+            return true;
+        } else if (strcmp(op, "OR") == 0) {
+            *value = left || right;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/* Helper: generate C-standard division (truncate towards zero)
+   VM implements floor division with adjustment, so we need to compensate.
+   VM's formula: if (a < 0 && b > 0): (a - b + 1) / b
+                 else if (a > 0 && b < 0): (a - b - 1) / b
+                 else: a / b
+
+   C standard: a / b truncates towards zero
+
+   To get C semantics from VM's floor division:
+   - If signs are same: VM result is correct
+   - If signs differ and remainder != 0: VM gives floor, we need to add 1 to get truncation
+
+   Strategy: Check if we need adjustment at runtime:
+   1. remainder = a - (result * b)
+   2. if (a < 0) XOR (b < 0) && remainder != 0: result++
+
+   But since we can't do XOR in IR, we handle each case:
+   - If a < 0 && b > 0: remainder > 0 means we need to add 1
+   - If a > 0 && b < 0: remainder < 0 means we need to add 1
+*/
+static void genCStandardDiv(pOperand result, pOperand dividend, pOperand divisor) {
+    genInterCode(IR_DIV, result, dividend, divisor);
+}
+
+/* Helper: translate expression to operand, always creating temps
+   This is safer than trying to reuse direct variable/constant operands
+   which may have complex lifetime issues. */
+static pOperand translateToOperand(Node *node) {
+    if (!node || node->child_count == 0)
+        return NULL;
+    pOperand temp = newTemp();
+    translateExpNode(node, temp);
+    return temp;
+}
+
+/* Helper: handle simple 1D array write when normal path fails */
+static void write1DArray(Node *arrNode, Node *idxNode, Node *valueNode, pOperand place) {
+    pOperand baseTmp = newTemp();
+    translateExpNode(arrNode, baseTmp);
+    pOperand indexTmp = newTemp();
+    translateExpNode(idxNode, indexTmp);
+    pOperand scaled = newTemp();
+    pOperand four = newOperand(OP_CONSTANT, 4);
+    genInterCode(IR_MUL, scaled, indexTmp, four);
+    pOperand off = newTemp();
+    genInterCode(IR_ADD, off, baseTmp, scaled);
+    pOperand rightOp = translateToOperand(valueNode);
+    genInterCode(IR_WRITE_ADDR, off, rightOp);
+    if (place) {
+        genInterCode(IR_ASSIGN, place, rightOp);
+    }
+    releaseTemp(baseTmp);
+    releaseTemp(indexTmp);
+    releaseTemp(scaled);
+    releaseTemp(off);
+    releaseTemp(rightOp);
+}
+
+/* Helper: handle simple 1D array read when normal path fails */
+static void read1DArray(Node *arrNode, Node *idxNode, pOperand place) {
+    pOperand baseTmp = newTemp();
+    translateExpNode(arrNode, baseTmp);
+    pOperand indexTmp = newTemp();
+    translateExpNode(idxNode, indexTmp);
+    pOperand scaled = newTemp();
+    pOperand four = newOperand(OP_CONSTANT, 4);
+    genInterCode(IR_MUL, scaled, indexTmp, four);
+    pOperand off = newTemp();
+    genInterCode(IR_ADD, off, baseTmp, scaled);
+    genInterCode(IR_READ_ADDR, place, off);
+    releaseTemp(baseTmp);
+    releaseTemp(indexTmp);
+    releaseTemp(scaled);
+    releaseTemp(off);
+}
+
+/* Helper: compute multi-dimensional array offset
+   Returns: finalAddr (computed or baseAddr), offsetSoFar (to be released)
+   Caller is responsible for releasing returned temps */
+typedef struct {
+    pOperand finalAddr;
+    pOperand offsetSoFar;
+    bool offsetInitialized;
+} ArrayOffsetResult;
+
+static ArrayOffsetResult computeArrayOffset(pOperand baseAddr, Node **idxNodes, int idxCount, Type *arrayType) {
+    ArrayOffsetResult result;
+    Type *t = arrayType;
+    pOperand offsetSoFar = newOperand(OP_CONSTANT, 0);
+    bool offsetInitialized = false;
+
+    for (int i = 0; i < idxCount; i++) {
+        if (!t || t->kind != ARRAY_TYPE) {
+            // indexing non-array
+            pOperand idxTmp = newTemp();
+            translateExpNode(idxNodes[i], idxTmp);
+            pOperand scaled = newTemp();
+            pOperand four = newOperand(OP_CONSTANT, 4);
+            genInterCode(IR_MUL, scaled, idxTmp, four);
+            if (!offsetInitialized) {
+                offsetSoFar = scaled;
+                offsetInitialized = true;
+            } else {
+                pOperand newOff = newTemp();
+                genInterCode(IR_ADD, newOff, offsetSoFar, scaled);
+                offsetSoFar = newOff;
+            }
+            releaseTemp(idxTmp);
+            releaseTemp(scaled);
+            break;
+        }
+
+        int elemSize = getSize(t->base);
+        pOperand idxTmp = newTemp();
+        translateExpNode(idxNodes[i], idxTmp);
+        pOperand scaled = newTemp();
+        pOperand sizeConst = newOperand(OP_CONSTANT, elemSize);
+        genInterCode(IR_MUL, scaled, idxTmp, sizeConst);
+        if (!offsetInitialized) {
+            offsetSoFar = scaled;
+            offsetInitialized = true;
+        } else {
+            pOperand newOff = newTemp();
+            genInterCode(IR_ADD, newOff, offsetSoFar, scaled);
+            offsetSoFar = newOff;
+            releaseTemp(newOff);
+        }
+        releaseTemp(idxTmp);
+        releaseTemp(scaled);
+        t = t->base;
+    }
+
+    pOperand finalAddr;
+    if (!offsetInitialized) {
+        finalAddr = baseAddr;
+    } else {
+        finalAddr = newTemp();
+        genInterCode(IR_ADD, finalAddr, baseAddr, offsetSoFar);
+    }
+
+    result.finalAddr = finalAddr;
+    result.offsetSoFar = offsetSoFar;
+    result.offsetInitialized = offsetInitialized;
+    return result;
+}
 
 extern int error_code;
 
@@ -13,13 +353,67 @@ void printError(int type, int line, const char *msg) {
     printf("Error type %d at Line %d: %s.\n", type, line, msg);
 }
 
+static Type *createPrimitiveType(TypeKind kind) {
+    Type *type = malloc(sizeof(Type));
+    if (!type)
+        return NULL;
+    type->kind = kind;
+    type->base = NULL;
+    type->arrayDim = 0;
+    type->arraySizes = NULL;
+    type->structType = NULL;
+    return type;
+}
+
+static void insertBuiltinFunctions(void) {
+    Type *readType = createPrimitiveType(INT_TYPE);
+    if (readType) {
+        Symbol *readFunc = createFunctionSymbol("read", readType, 0, 0, NULL);
+        if (readFunc) {
+            readFunc->info.func_info.isDefined = true;
+            insertSymbol(readFunc);
+        }
+    }
+
+    Type *writeRetType = createPrimitiveType(INT_TYPE);
+    Type *writeParamType = createPrimitiveType(INT_TYPE);
+    if (writeRetType && writeParamType) {
+        Symbol *paramSym = createVariableSymbol("x", writeParamType, 0);
+        Symbol *args[1] = {paramSym};
+        Symbol *writeFunc = createFunctionSymbol("write", writeRetType, 0, 1, args);
+        if (writeFunc) {
+            writeFunc->info.func_info.isDefined = true;
+            insertSymbol(writeFunc);
+        }
+    }
+}
+
 // ==================== 主入口 ====================
-void semanticAnalysis(Node *root) {
+bool semanticAnalysis(Node *root) {
     if (!root)
-        return;
+        return false;
+    // Fast AST pre-scan: refuse translation early if struct-type variables
+    // or struct-type function parameters appear anywhere in the AST.
+    if (astContainsStructUsage(root)) {
+        printf("Cannot translate: Code contains variables or parameters of structure type.\n");
+        return false;
+    }
+    // Initialize IR code list for IR generation during traversal
+    if (!interCodeList)
+        interCodeList = newInterCodeList();
     enterScope();
+    insertBuiltinFunctions();
     traverseProgram(root);
+    // Check for unsupported structure type variables BEFORE exitScope
+    bool hasStruct = hasStructTypeVariable();
     exitScope();
+    if (hasStruct) {
+        printf("Cannot translate: Code contains variables or parameters of structure type.\n");
+        return false;
+    }
+    // Optimize IR after traversal is complete
+    optimizeIR(interCodeList);
+    return true;
 }
 
 // ==================== Program/ExtDefList/ExtDef ====================
@@ -67,43 +461,21 @@ void traverseExtDecList(Node *node, Type *baseType) {
     if (!node || node->child_count == 0)
         return;
     Node *varDec = node->children[0];
-    // 递归查找 ID 节点，兼容多维数组 VarDec 嵌套结构
     Node *idNode = varDec;
-    while (idNode->child_count > 0 && strcmp(idNode->type, "ID") != 0) {
-        idNode = idNode->children[0];
-    }
-    if (!idNode || strcmp(idNode->type, "ID") != 0) {
+    while (idNode->child_count > 0 && strcmp(idNode->type, "ID") != 0) idNode = idNode->children[0];
+    if (!idNode || strcmp(idNode->type, "ID") != 0)
         return;
-    }
-    char *varName = idNode->value;
-    int line = idNode->lineNo;
 
-    // 处理数组类型
-    Type *finalType = baseType;
-    Node *cur = varDec;
-    while (cur->child_count == 4) {
-        Type *arr = malloc(sizeof(Type));
-        arr->kind = ARRAY_TYPE;
-        arr->base = finalType;
-        arr->arrayDim = 1;
-        arr->arraySizes = malloc(sizeof(int));
-        arr->arraySizes[0] = atoi(cur->children[2]->value);
-        arr->structType = NULL;
-        finalType = arr;
-        cur = cur->children[0];
-    }
-
-    // 检查变量名是否与结构体名重复
-    Symbol *existing = findSymbol(varName);
+    Type *finalType = buildArrayType(varDec, baseType);
+    Symbol *existing = findSymbol(idNode->value);
     if (existing && existing->kind == STRUCT_KIND) {
-        printError(3, line, "Variable name conflicts with struct name");
+        printError(3, idNode->lineNo, "Variable name conflicts with struct name");
     } else {
-        Symbol *varSym = createVariableSymbol(varName, finalType, line);
+        Symbol *varSym = createVariableSymbol(idNode->value, finalType, idNode->lineNo);
         insertSymbol(varSym);
         if (error_code != 0)
-            printError(error_code, line, "Variable insert error");
+            printError(error_code, idNode->lineNo, "Variable insert error");
     }
-
     if (node->child_count == 3)
         traverseExtDecList(node->children[2], baseType);
 }
@@ -133,53 +505,33 @@ void traverseDecList(Node *node, Type *baseType) {
         return;
     Node *dec = node->children[0];
     Node *varDec = dec->children[0];
-
-    // 修正：递归查找ID节点，处理数组变量的嵌套结构
     Node *idNode = varDec;
-    while (idNode->child_count > 0 && strcmp(idNode->type, "ID") != 0) {
-        idNode = idNode->children[0];
-    }
-
-    if (strcmp(idNode->type, "ID") != 0) {
+    while (idNode->child_count > 0 && strcmp(idNode->type, "ID") != 0) idNode = idNode->children[0];
+    if (strcmp(idNode->type, "ID") != 0)
         return;
-    }
 
-    char *varName = idNode->value;
-    int line = idNode->lineNo;
-
-    // 处理数组类型
-    Type *finalType = baseType;
-    Node *cur = varDec;
-    while (cur->child_count == 4) {
-        Type *arr = malloc(sizeof(Type));
-        arr->kind = ARRAY_TYPE;
-        arr->base = finalType;
-        arr->arrayDim = 1;
-        arr->arraySizes = malloc(sizeof(int));
-        arr->arraySizes[0] = atoi(cur->children[2]->value);
-        arr->structType = NULL;
-        finalType = arr;
-        cur = cur->children[0];
-    }
-
-    // 检查变量名是否与结构体名重复
-    Symbol *existing = findSymbol(varName);
+    Type *finalType = buildArrayType(varDec, baseType);
+    Symbol *existing = findSymbol(idNode->value);
     if (existing && existing->kind == STRUCT_KIND) {
-        printError(3, line, "Variable name conflicts with struct name");
+        printError(3, idNode->lineNo, "Variable name conflicts with struct name");
     } else {
-        Symbol *varSym = createVariableSymbol(varName, finalType, line);
+        Symbol *varSym = createVariableSymbol(idNode->value, finalType, idNode->lineNo);
         insertSymbol(varSym);
-        if (error_code != 0) {
-            printError(error_code, line, "Variable insert error");
-        }
+        if (error_code != 0)
+            printError(error_code, idNode->lineNo, "Variable insert error");
+        int size = getSize(finalType);
+        pOperand op = newOperand(OP_VARIABLE, idNode->value);
+        genInterCode(IR_DEC, op, size);
     }
-
-    // 检查初始化类型
     if (dec->child_count == 3) {
         Type *expType = checkExp(dec->children[2]);
-        if (!TypeEqual(finalType, expType)) {
-            printError(5, line, "Type mismatched for assignment");
-        }
+        if (!TypeEqual(finalType, expType))
+            printError(5, idNode->lineNo, "Type mismatched for assignment");
+        pOperand targetOp = newOperand(OP_VARIABLE, idNode->value);
+        // Optimize: use translateToOperand to avoid unnecessary temp for simple init
+        pOperand rhsOp = translateToOperand(dec->children[2]);
+        genInterCode(IR_ASSIGN, targetOp, rhsOp);
+        releaseTemp(rhsOp);
     }
     if (node->child_count == 3)
         traverseDecList(node->children[2], baseType);
@@ -252,7 +604,6 @@ Type *handleStructSpecifier(Node *node) {
                 }
                 char *fieldName = idNode->value;
                 int line = idNode->lineNo;
-                // 域名重复
                 bool duplicate = false;
                 for (int j = 0; j < idx; j++) {
                     if (strcmp(members[j]->name, fieldName) == 0) {
@@ -262,30 +613,15 @@ Type *handleStructSpecifier(Node *node) {
                     }
                 }
                 if (duplicate) {
-                    // 跳过重复的成员，不添加到members数组中
                     if (curDecList->child_count == 3)
                         curDecList = curDecList->children[2];
                     else
                         break;
-                    continue; // 跳过后续处理
+                    continue;
                 }
-                // 域初始化
                 if (dec->child_count == 3)
                     printError(15, line, "Struct field initialized");
-                // 处理数组
-                Type *finalType = baseType;
-                Node *curVar = varDec;
-                while (curVar->child_count == 4) {
-                    Type *arr = malloc(sizeof(Type));
-                    arr->kind = ARRAY_TYPE;
-                    arr->base = finalType;
-                    arr->arrayDim = 1;
-                    arr->arraySizes = malloc(sizeof(int));
-                    arr->arraySizes[0] = atoi(curVar->children[2]->value);
-                    arr->structType = NULL;
-                    finalType = arr;
-                    curVar = curVar->children[0];
-                }
+                Type *finalType = buildArrayType(varDec, baseType);
                 members[idx++] = createVariableSymbol(fieldName, finalType, line);
                 if (curDecList->child_count == 3)
                     curDecList = curDecList->children[2];
@@ -297,24 +633,14 @@ Type *handleStructSpecifier(Node *node) {
             else
                 break;
         }
-        // 使用实际添加的成员数量 idx，而不是初始的 memberCount
         Symbol *structSym = createStructSymbol(structName ? structName : "", node->lineNo, idx, members);
-        // 添加调试代码
-        // printf("DEBUG: createStructSymbol returned %p, error_code=%d\n", (void*)structSym, error_code);
-        if (structSym == NULL) {
-            // printf("DEBUG: createStructSymbol failed, likely due to duplicate members\n");
-            //  如果创建结构体符号失败（可能是因为重复成员），直接返回NULL
+        if (structSym == NULL)
             return NULL;
-        }
         if (structName) {
             Symbol *exist = findSymbol(structName);
-            // 添加调试代码
-            // printf("DEBUG: Checking struct redefinition for '%s' at line %d\n", structName, node->lineNo);
             if (exist) {
-                // printf("DEBUG: Struct '%s' already exists, kind=%d\n", structName, exist->kind);
                 printError(16, node->lineNo, "Struct name redefined");
             } else {
-                // printf("DEBUG: Inserting new struct '%s'\n", structName);
                 insertSymbol(structSym);
             }
         }
@@ -442,6 +768,17 @@ void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
     }
     /* 函数体处理：先进入作用域，再插入参数符号，然后处理函数体内部
        不通过 traverseCompSt（避免双重 enter），而是直接处理 DefList 和 StmtList */
+
+    // Generate FUNCTION IR for this function
+    pOperand funcOp = newOperand(OP_FUNCTION, funcName);
+    genInterCode(IR_FUNCTION, funcOp);
+
+    // Set up current function's parameter list for array handling
+    currentFuncParamCount = argNum;
+    for (int i = 0; i < argNum; i++) {
+        currentFuncParamList[i] = argList[i]->name;
+    }
+
     enterScope();
     for (int i = 0; i < argNum; i++) {
         // 检查参数名是否与结构体名冲突
@@ -453,6 +790,9 @@ void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
             if (error_code != 0)
                 printError(error_code, argList[i]->lineno, "Function parameter insert error");
         }
+        // Generate PARAM IR for each parameter
+        pOperand paramOp = newOperand(OP_VARIABLE, argList[i]->name);
+        genInterCode(IR_PARAM, paramOp);
     }
     // 直接处理函数体的 DefList 和 StmtList，不调用 traverseCompSt（避免双重作用域）
     if (compSt && compSt->child_count >= 3) {
@@ -462,6 +802,10 @@ void handleFuncDef(Node *funDec, Type *retType, Node *compSt) {
         traverseStmtList(stmtList, retType);
     }
     exitScope();
+
+    // Clear current function's parameter list and pointerized arrays
+    currentFuncParamCount = 0;
+    clearPointerizedArrays();
 }
 
 // ==================== 语句块/语句 ====================
@@ -491,7 +835,10 @@ void traverseStmt(Node *node, Type *retType) {
         return;
     Node *first = node->children[0];
     if (strcmp(first->type, "Exp") == 0) {
-        checkExp(first);
+        // Generate IR for expression statement
+        pOperand unused = newTemp();
+        translateExpNode(first, unused);
+        releaseTemp(unused);
     } else if (strcmp(first->type, "CompSt") == 0) {
         // debug: entering nested CompSt
         traverseCompSt(first, retType);
@@ -499,14 +846,46 @@ void traverseStmt(Node *node, Type *retType) {
         Type *expType = checkExp(node->children[1]);
         if (!TypeEqual(retType, expType))
             printError(8, node->children[0]->lineNo, "Type mismatched for return");
+
+        // Generate RETURN IR
+        pOperand returnVal = newTemp();
+        translateExpNode(node->children[1], returnVal);
+        genInterCode(IR_RETURN, returnVal);
+        releaseTemp(returnVal);
     } else if (strcmp(first->type, "IF") == 0) {
         checkExp(node->children[2]);
+
+        // Generate IF/ELSE IR structure
+        pOperand labelTrue = newLabel();
+        pOperand labelFalse = newLabel();
+        translateCondNode(node->children[2], labelTrue, labelFalse);
+
+        genInterCode(IR_LABEL, labelTrue);
         traverseStmt(node->children[4], retType);
-        if (node->child_count == 7)
+
+        if (node->child_count == 7) {
+            pOperand labelEnd = newLabel();
+            genInterCode(IR_GOTO, labelEnd);
+            genInterCode(IR_LABEL, labelFalse);
             traverseStmt(node->children[6], retType);
+            genInterCode(IR_LABEL, labelEnd);
+        } else {
+            genInterCode(IR_LABEL, labelFalse);
+        }
     } else if (strcmp(first->type, "WHILE") == 0) {
         checkExp(node->children[2]);
+
+        // Generate WHILE IR structure
+        pOperand labelBegin = newLabel();
+        pOperand labelBody = newLabel();
+        pOperand labelEnd = newLabel();
+
+        genInterCode(IR_LABEL, labelBegin);
+        translateCondNode(node->children[2], labelBody, labelEnd);
+        genInterCode(IR_LABEL, labelBody);
         traverseStmt(node->children[4], retType);
+        genInterCode(IR_GOTO, labelBegin);
+        genInterCode(IR_LABEL, labelEnd);
     }
 }
 
@@ -517,7 +896,6 @@ Type *checkExp(Node *exp) {
     Node *c = exp->children[0];
     // ID
     if (strcmp(c->type, "ID") == 0 && exp->child_count == 1) {
-        // printf("DEBUG: 检查ID节点 '%s' 在第 %d 行\n", c->value, c->lineNo);
         Symbol *sym = findSymbol(c->value);
         if (!sym) {
             printError(1, c->lineNo, "Undefined variable");
@@ -710,15 +1088,504 @@ Symbol *getStructField(Symbol *structSym, char *fieldName) {
 }
 
 // ==================== 资源释放 ====================
+// ==================== 资源管理 ====================
+static bool hasStructTypeVariable(void) {
+    extern Symbol *stak[];
+    extern int top;
+    // Check all scopes from global (0) to current (top)
+    for (int scope = 0; scope <= top; scope++) {
+        Symbol *syms = stak[scope];
+        for (Symbol *sym = syms; sym != NULL; sym = sym->next) {
+            if (sym->kind == VAR_KIND) {
+                Type *type = sym->info.var_info.type;
+                if (type && type->kind == STRUCTURE_TYPE)
+                    return true;
+            } else if (sym->kind == FUNC_KIND) {
+                // Check function parameters
+                int paramCount = sym->info.func_info.argNum;
+                for (int j = 0; j < paramCount; j++) {
+                    Symbol *param = sym->info.func_info.arg_list[j];
+                    if (param && param->kind == VAR_KIND) {
+                        Type *type = param->info.var_info.type;
+                        if (type && type->kind == STRUCTURE_TYPE)
+                            return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
 void freeSemanticResource(void) {
     extern int top;
     extern Symbol *stak[];
-
-    // exitScope 已经在每次调用时释放了对应层的符号
-    // 这里只需要确保所有作用域都被清理
-    // 如果 top >= 0，说明还有未退出的作用域，需要手动清理
     while (top >= 0) {
         freeSymbolStack(top);
         top--;
     }
+}
+
+// ==================== 中间代码生成 ====================
+void generateIRFromAST(pNode root) {
+    // IR generation is done during semantic analysis traversal
+}
+
+static void translateExpNode(Node *node, pOperand place) {
+    if (!node)
+        return;
+
+    // Try constant folding at compile time
+    // This ensures we use C standard integer semantics, not VM's floor division
+    int constVal;
+    if (evalConstExp(node, &constVal)) {
+        pOperand constOp = newOperand(OP_CONSTANT, constVal);
+        genInterCode(IR_ASSIGN, place, constOp);
+        return;
+    }
+
+    // For assignment expressions, handle specially
+    if (node->child_count == 3 && strcmp(node->children[1]->type, "ASSIGNOP") == 0) {
+        // Check if left side is array access (Exp LB Exp RB) or simple variable
+        Node *leftExp = node->children[0];
+
+        if (leftExp->child_count == 4 && strcmp(leftExp->children[1]->type, "LB") == 0) {
+            // Array assignment: arr[idx...] = value (supports multi-dimensional)
+            // Collect all indices by traversing nested LB structures
+            Node *cur = leftExp;
+            Node *indices[32];
+            int idxCount = 0;
+            while (cur && cur->child_count == 4 && strcmp(cur->children[1]->type, "LB") == 0) {
+                indices[idxCount++] = cur->children[2];
+                cur = cur->children[0];
+                if (idxCount >= 32)
+                    break;
+            }
+            // cur should now be the base (hopefully ID)
+            if (!cur || cur->child_count != 1 || strcmp(cur->children[0]->type, "ID") != 0) {
+                // Fallback: simple 1D array write
+                write1DArray(leftExp->children[0], leftExp->children[2], node->children[2], place);
+                return;
+            }
+
+            char *baseName = cur->children[0]->value;
+            Symbol *sym = findSymbol(baseName);
+            if (!sym || sym->kind != VAR_KIND) {
+                // Fallback: simple 1D array write
+                write1DArray(leftExp->children[0], leftExp->children[2], node->children[2], place);
+                return;
+            }
+
+            // Compute multi-dimensional offset (same logic as array read)
+            Type *t = sym->info.var_info.type;
+            int n = idxCount;
+            Node *idxNodes[32];
+            for (int i = 0; i < n; i++) idxNodes[i] = indices[n - 1 - i];
+
+            // Check if this is a parameter array, pointerized array, or local array
+            pOperand baseAddr;
+            if (isParameterArrayName(baseName) || isPointerizedArray(baseName)) {
+                // Parameter or pointerized array: variable contains address
+                baseAddr = newOperand(OP_VARIABLE, baseName);
+            } else {
+                // Local array: need & to get address
+                baseAddr = newOperand(OP_ADDRESS, baseName);
+            }
+
+            ArrayOffsetResult offset = computeArrayOffset(baseAddr, idxNodes, n, t);
+
+            // Write value to address
+            pOperand rightOp = translateToOperand(node->children[2]);
+            genInterCode(IR_WRITE_ADDR, offset.finalAddr, rightOp);
+            if (place) {
+                genInterCode(IR_ASSIGN, place, rightOp);
+            }
+
+            releaseTemp(offset.finalAddr);
+            releaseTemp(offset.offsetSoFar);
+            releaseTemp(baseAddr);
+            releaseTemp(rightOp);
+        } else {
+            // Simple variable assignment
+            char *leftName = getLeftValueName(leftExp);
+            if (leftName) {
+                // Check if left side is an array being assigned an address (e.g., b = a)
+                Symbol *leftSym = findSymbol(leftName);
+                if (leftSym && leftSym->kind == VAR_KIND && 
+                    leftSym->info.var_info.type && 
+                    leftSym->info.var_info.type->kind == ARRAY_TYPE) {
+                    // Left side is an array, mark it as pointerized
+                    markArrayAsPointerized(leftName);
+                }
+                
+                pOperand leftOp = newOperand(OP_VARIABLE, leftName);
+                // Optimize: use translateToOperand to avoid temp for simple RHS
+                pOperand rightOp = translateToOperand(node->children[2]);
+                genInterCode(IR_ASSIGN, leftOp, rightOp);
+                // Only assign to place if it was explicitly provided
+                if (place) {
+                    genInterCode(IR_ASSIGN, place, leftOp);
+                }
+                releaseTemp(rightOp);
+            }
+        }
+        return;
+    }
+
+    // For other expressions, create place if not provided
+    if (!place)
+        place = newTemp();
+
+    if (node->child_count == 1) {
+        Node *child = node->children[0];
+        if (strcmp(child->type, "ID") == 0) {
+            char *idName = child->value;
+            Symbol *sym = findSymbol(idName);
+
+            // Check if this is an array - if so, pass address instead of variable
+            int isArray = 0;
+            if (sym && sym->kind == VAR_KIND && sym->info.var_info.type) {
+                if (sym->info.var_info.type->kind == ARRAY_TYPE) {
+                    isArray = 1;
+                }
+            }
+
+            if (isArray) {
+                // Array: check if parameter or local
+                if (isParameterArrayName(idName)) {
+                    // Parameter array: already contains address
+                    pOperand varOp = newOperand(OP_VARIABLE, idName);
+                    genInterCode(IR_ASSIGN, place, varOp);
+                } else {
+                    // Local array: need & to get address
+                    pOperand addrOp = newOperand(OP_ADDRESS, idName);
+                    genInterCode(IR_ASSIGN, place, addrOp);
+                }
+            } else {
+                pOperand varOp = newOperand(OP_VARIABLE, idName);
+                genInterCode(IR_ASSIGN, place, varOp);
+            }
+        } else if (strcmp(child->type, "INT") == 0) {
+            int value = atoi(child->value);
+            pOperand constOp = newOperand(OP_CONSTANT, value);
+            genInterCode(IR_ASSIGN, place, constOp);
+        }
+        return;
+    }
+
+    if ((node->child_count == 2 && strcmp(node->children[0]->type, "NOT") == 0) ||
+        (node->child_count == 3 && (strcmp(node->children[1]->type, "RELOP") == 0 ||
+                                    strcmp(node->children[1]->type, "AND") == 0 ||
+                                    strcmp(node->children[1]->type, "OR") == 0))) {
+        pOperand labelTrue = newLabel();
+        pOperand labelFalse = newLabel();
+        pOperand zero = newOperand(OP_CONSTANT, 0);
+        pOperand one = newOperand(OP_CONSTANT, 1);
+        genInterCode(IR_ASSIGN, place, zero);
+        translateCondNode(node, labelTrue, labelFalse);
+        genInterCode(IR_LABEL, labelTrue);
+        genInterCode(IR_ASSIGN, place, one);
+        genInterCode(IR_LABEL, labelFalse);
+        return;
+    }
+
+    if (node->child_count == 2 && strcmp(node->children[0]->type, "MINUS") == 0) {
+        pOperand t1 = newTemp();
+        translateExpNode(node->children[1], t1);
+        pOperand zero = newOperand(OP_CONSTANT, 0);
+        genInterCode(IR_SUB, place, zero, t1);
+        /* t1 no longer needed after subtraction */
+        releaseTemp(t1);
+        return;
+    }
+
+    if (node->child_count == 3 && strcmp(node->children[0]->type, "LP") == 0 && strcmp(node->children[2]->type, "RP") == 0) {
+        translateExpNode(node->children[1], place);
+        return;
+    }
+
+    // Array access: handle multi-dimensional chains like a[i][j][k]
+    if (node->child_count == 4 && strcmp(node->children[1]->type, "LB") == 0) {
+        // Collect indices and find base ID
+        Node *cur = node;
+        // indices will be collected in reverse (from rightmost to leftmost)
+        Node *indices[32];
+        int idxCount = 0;
+        while (cur && cur->child_count == 4 && strcmp(cur->children[1]->type, "LB") == 0) {
+            indices[idxCount++] = cur->children[2];
+            cur = cur->children[0];
+            if (idxCount >= 32)
+                break; // safety
+        }
+        // cur should now be the base (hopefully ID)
+        if (!cur || cur->child_count != 1 || strcmp(cur->children[0]->type, "ID") != 0) {
+            // fallback: treat as general expression
+            read1DArray(node->children[0], node->children[2], place);
+            return;
+        }
+        char *baseName = cur->children[0]->value;
+        Symbol *sym = findSymbol(baseName);
+        if (!sym || sym->kind != VAR_KIND) {
+            // symbol not found or not variable: fallback
+            read1DArray(node->children[0], node->children[2], place);
+            return;
+        }
+
+        Type *t = sym->info.var_info.type;
+        int n = idxCount;
+        Node *idxNodes[32];
+        for (int i = 0; i < n; i++) idxNodes[i] = indices[n - 1 - i];
+
+        pOperand baseAddr;
+        if (isParameterArrayName(baseName) || isPointerizedArray(baseName)) {
+            // Parameter or pointerized array: variable contains address
+            baseAddr = newOperand(OP_VARIABLE, baseName);
+        } else {
+            // Local array: need & to get address
+            baseAddr = newOperand(OP_ADDRESS, baseName);
+        }
+
+        ArrayOffsetResult offset = computeArrayOffset(baseAddr, idxNodes, n, t);
+        genInterCode(IR_READ_ADDR, place, offset.finalAddr);
+        releaseTemp(offset.finalAddr);
+        releaseTemp(offset.offsetSoFar);
+        releaseTemp(baseAddr);
+        return;
+    }
+
+    // Function calls: read() or write(arg) or other_func() or other_func(args)
+    if (node->child_count >= 3 && strcmp(node->children[0]->type, "ID") == 0 && strcmp(node->children[1]->type, "LP") == 0) {
+        char *funcName = node->children[0]->value;
+        if (strcmp(funcName, "read") == 0) {
+            genInterCode(IR_READ, place);
+        } else if (strcmp(funcName, "write") == 0 && node->child_count == 4) {
+            // node->children[2] is Args (which contains Exp)
+            // Args can be: Exp COMMA Args (3 children) or just Exp (1 child)
+            Node *argsNode = node->children[2];
+            Node *firstExp = argsNode->child_count > 0 ? argsNode->children[0] : NULL;
+
+            // Optimize: avoid temp for simple expressions in write
+            pOperand argOp;
+            if (firstExp && firstExp->child_count == 1 && strcmp(firstExp->children[0]->type, "ID") == 0) {
+                argOp = newOperand(OP_VARIABLE, firstExp->children[0]->value);
+            } else if (firstExp && firstExp->child_count == 1 && strcmp(firstExp->children[0]->type, "INT") == 0) {
+                argOp = newOperand(OP_CONSTANT, atoi(firstExp->children[0]->value));
+            } else {
+                argOp = newTemp();
+                if (firstExp)
+                    translateExpNode(firstExp, argOp);
+            }
+            genInterCode(IR_WRITE, argOp);
+            /* release temp used for write arg */
+            releaseTemp(argOp);
+        } else if (node->child_count == 3) {
+            // Function call with no arguments
+            pOperand funcOp = newOperand(OP_FUNCTION, funcName);
+            genInterCode(IR_CALL, place, funcOp);
+        } else {
+            // Function call with arguments: ID LP Args RP
+            // node->children[2] is Args
+            translateArgsNode(node->children[2]);
+            pOperand funcOp = newOperand(OP_FUNCTION, funcName);
+            genInterCode(IR_CALL, place, funcOp);
+        }
+        return;
+    }
+
+    if (node->child_count == 3 &&
+        (strcmp(node->children[1]->type, "PLUS") == 0 || strcmp(node->children[1]->type, "MINUS") == 0 ||
+         strcmp(node->children[1]->type, "STAR") == 0 || strcmp(node->children[1]->type, "DIV") == 0)) {
+        // Optimize: avoid creating temps for simple operands
+        pOperand t1 = translateToOperand(node->children[0]);
+        pOperand t2 = translateToOperand(node->children[2]);
+        InterCodeKind kind = getBinaryOpKind(node->children[1]->type);
+        genInterCode(kind, place, t1, t2);
+        /* try to release t1 and t2 if they are temps */
+        releaseTemp(t1);
+        releaseTemp(t2);
+        return;
+    }
+
+    // Handle simple ID (variable reference, including arrays when passed as parameter)
+
+    // Handle integer constants
+    if (node->child_count == 1 && strcmp(node->children[0]->type, "INT") == 0) {
+        int val = atoi(node->children[0]->value);
+        pOperand constOp = newOperand(OP_CONSTANT, val);
+        genInterCode(IR_ASSIGN, place, constOp);
+        return;
+    }
+}
+
+// Process a single argument expression
+// For simple variables/constants, directly generate ARG to avoid extra temp assignment
+static void processArgument(Node *exp) {
+    if (!exp)
+        return;
+
+    // For simple ID, check if it's an array
+    if (exp->child_count == 1 && strcmp(exp->children[0]->type, "ID") == 0) {
+        char *idName = exp->children[0]->value;
+        Symbol *sym = findSymbol(idName);
+
+        // Check if this is an array
+        int isArray = 0;
+        if (sym && sym->kind == VAR_KIND && sym->info.var_info.type) {
+            if (sym->info.var_info.type->kind == ARRAY_TYPE) {
+                isArray = 1;
+            }
+        }
+
+        if (isArray) {
+            // For arrays:
+            // - If it's a parameter, pass it directly (it already contains address)
+            // - If it's local, get its address with &
+            if (isParameterArrayName(idName)) {
+                // Parameter array: already contains address, pass directly
+                pOperand var = newOperand(OP_VARIABLE, idName);
+                genInterCode(IR_ARG, var);
+            } else {
+                // Local array: generate address
+                pOperand addr = newOperand(OP_ADDRESS, idName);
+                genInterCode(IR_ARG, addr);
+            }
+        } else {
+            // For non-arrays, pass variable directly
+            pOperand var = newOperand(OP_VARIABLE, idName);
+            genInterCode(IR_ARG, var);
+        }
+        return;
+    }
+
+    // For simple INT, pass directly
+    if (exp->child_count == 1 && strcmp(exp->children[0]->type, "INT") == 0) {
+        int val = atoi(exp->children[0]->value);
+        pOperand constOp = newOperand(OP_CONSTANT, val);
+        genInterCode(IR_ARG, constOp);
+        return;
+    }
+
+    // For complex expressions, use temp
+    pOperand arg = newTemp();
+    translateExpNode(exp, arg);
+    genInterCode(IR_ARG, arg);
+}
+
+// Recursively process arguments from RIGHT to LEFT
+// This helps avoid infinite recursion in nested function calls
+static void translateArgsNodeRecursive(Node *node) {
+    if (!node || node->child_count == 0)
+        return;
+
+    if (node->child_count == 1) {
+        // Args : Exp (base case: single argument)
+        processArgument(node->children[0]);
+    } else if (node->child_count == 3) {
+        // Args : Exp COMMA Args
+        // Process right Args first (right to left)
+        Node *rightArgs = node->children[2];
+        translateArgsNodeRecursive(rightArgs);
+
+        // Then process left Exp
+        processArgument(node->children[0]);
+    }
+}
+
+static void translateArgsNode(Node *node) {
+    if (!node || node->child_count == 0)
+        return;
+    translateArgsNodeRecursive(node);
+}
+
+static void translateCondNode(Node *node, pOperand labelTrue, pOperand labelFalse) {
+    if (!node)
+        return;
+    if (node->child_count == 2 && strcmp(node->children[0]->type, "NOT") == 0) {
+        translateCondNode(node->children[1], labelFalse, labelTrue);
+        return;
+    }
+    if (node->child_count == 3 && strcmp(node->children[1]->type, "RELOP") == 0) {
+        pOperand t1 = translateToOperand(node->children[0]);
+        pOperand t2 = translateToOperand(node->children[2]);
+        pOperand relop = newOperand(OP_RELOP, node->children[1]->value);
+        genInterCode(IR_IF_GOTO, t1, relop, t2, labelTrue);
+        genInterCode(IR_GOTO, labelFalse);
+        /* release temps used in condition evaluation */
+        releaseTemp(t1);
+        releaseTemp(t2);
+        return;
+    }
+    if (node->child_count == 3 && strcmp(node->children[1]->type, "AND") == 0) {
+        pOperand labelMid = newLabel();
+        translateCondNode(node->children[0], labelMid, labelFalse);
+        genInterCode(IR_LABEL, labelMid);
+        translateCondNode(node->children[2], labelTrue, labelFalse);
+        return;
+    }
+    if (node->child_count == 3 && strcmp(node->children[1]->type, "OR") == 0) {
+        pOperand labelMid = newLabel();
+        translateCondNode(node->children[0], labelTrue, labelMid);
+        genInterCode(IR_LABEL, labelMid);
+        translateCondNode(node->children[2], labelTrue, labelFalse);
+        return;
+    }
+    pOperand t1 = newTemp();
+    translateExpNode(node, t1);
+    pOperand zero = newOperand(OP_CONSTANT, 0);
+    pOperand relop = newOperand(OP_RELOP, "!=");
+    genInterCode(IR_IF_GOTO, t1, relop, zero, labelTrue);
+    genInterCode(IR_GOTO, labelFalse);
+    releaseTemp(t1);
+}
+
+// Fast AST pre-scan: detect whether the AST contains uses of structure types
+// as variables or function parameters. This scan only checks node types
+// and shapes (no symbol table operations) and returns true if translation
+// should be refused early to avoid expensive IR generation.
+static bool astContainsStructUsage(Node *node) {
+    if (!node)
+        return false;
+    // Check current node patterns
+    // ExtDef: Specifier ExtDecList SEMI  -> global variable declaration
+    if (strcmp(node->type, "ExtDef") == 0 && node->child_count >= 2) {
+        Node *spec = node->children[0];
+        if (spec && spec->child_count > 0 && strcmp(spec->children[0]->type, "StructSpecifier") == 0) {
+            // If this ExtDef has a ExtDecList (variable declared), it's a struct variable
+            if (node->child_count >= 2 && node->children[1] && strcmp(node->children[1]->type, "ExtDecList") == 0)
+                return true;
+        }
+    }
+    // Def: Specifier DecList SEMI  -> local variable declaration inside CompSt
+    if (strcmp(node->type, "Def") == 0 && node->child_count >= 2) {
+        Node *spec = node->children[0];
+        if (spec && spec->child_count > 0 && strcmp(spec->children[0]->type, "StructSpecifier") == 0) {
+            return true;
+        }
+    }
+    // Param declaration inside VarList: ParamDec -> Specifier VarDec
+    if (strcmp(node->type, "ParamDec") == 0 && node->child_count >= 1) {
+        Node *spec = node->children[0];
+        if (spec && spec->child_count > 0 && strcmp(spec->children[0]->type, "StructSpecifier") == 0)
+            return true;
+        // Also detect multi-dimensional array parameters (unsupported):
+        if (node->child_count >= 2) {
+            Node *varDec = node->children[1];
+            int dims = 0;
+            Node *cur = varDec;
+            while (cur && cur->child_count == 4) { // VarDec -> VarDec LB INT RB
+                dims++;
+                cur = cur->children[0];
+            }
+            if (dims > 1) {
+                // multi-dimensional array parameter found -> unsupported
+                return true;
+            }
+        }
+    }
+    // Also handle VarList nodes where ParamDec may appear as child
+    for (int i = 0; i < node->child_count; i++) {
+        if (astContainsStructUsage(node->children[i]))
+            return true;
+    }
+    return false;
 }
