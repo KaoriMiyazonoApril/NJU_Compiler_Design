@@ -224,12 +224,31 @@ static void genCStandardDiv(pOperand result, pOperand dividend, pOperand divisor
     genInterCode(IR_DIV, result, dividend, divisor);
 }
 
-/* Helper: translate expression to operand, always creating temps
-   This is safer than trying to reuse direct variable/constant operands
-   which may have complex lifetime issues. */
+/* Helper: translate expression to operand
+   For simple expressions (constants, variables), return operand directly.
+   For complex expressions, create a temp and translate into it. */
 static pOperand translateToOperand(Node *node) {
     if (!node || node->child_count == 0)
         return NULL;
+    
+    // Optimization: for simple constant expressions, return constant directly
+    int constVal;
+    if (evalConstExp(node, &constVal)) {
+        return newOperand(OP_CONSTANT, constVal);
+    }
+    
+    // Optimization: for simple variable reference, return variable directly
+    if (node->child_count == 1 && strcmp(node->children[0]->type, "ID") == 0) {
+        char *name = node->children[0]->value;
+        Symbol *sym = findSymbol(name);
+        // Only optimize for non-array variables
+        if (sym && sym->kind == VAR_KIND && sym->info.var_info.type &&
+            sym->info.var_info.type->kind != ARRAY_TYPE) {
+            return newOperand(OP_VARIABLE, name);
+        }
+    }
+    
+    // For complex expressions, create temp
     pOperand temp = newTemp();
     translateExpNode(node, temp);
     return temp;
@@ -519,9 +538,12 @@ void traverseDecList(Node *node, Type *baseType) {
         insertSymbol(varSym);
         if (error_code != 0)
             printError(error_code, idNode->lineNo, "Variable insert error");
-        int size = getSize(finalType);
-        pOperand op = newOperand(OP_VARIABLE, idNode->value);
-        genInterCode(IR_DEC, op, size);
+        // Only generate DEC for arrays and structs, not for simple int/float
+        if (finalType->kind == ARRAY_TYPE || finalType->kind == STRUCTURE_TYPE) {
+            int size = getSize(finalType);
+            pOperand op = newOperand(OP_VARIABLE, idNode->value);
+            genInterCode(IR_DEC, op, size);
+        }
     }
     if (dec->child_count == 3) {
         Type *expType = checkExp(dec->children[2]);
@@ -836,9 +858,8 @@ void traverseStmt(Node *node, Type *retType) {
     Node *first = node->children[0];
     if (strcmp(first->type, "Exp") == 0) {
         // Generate IR for expression statement
-        pOperand unused = newTemp();
-        translateExpNode(first, unused);
-        releaseTemp(unused);
+        // Pass NULL as place since we don't need the result value
+        translateExpNode(first, NULL);
     } else if (strcmp(first->type, "CompSt") == 0) {
         // debug: entering nested CompSt
         traverseCompSt(first, retType);

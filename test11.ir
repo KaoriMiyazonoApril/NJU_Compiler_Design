@@ -1,0 +1,152 @@
+FUNCTION main :
+DEC i 4
+DEC j 4
+DEC o_cnt 4
+t1 := #0
+o_cnt := t1
+DEC i_cnt 4
+t2 := #0
+i_cnt := t2
+DEC len 4
+t3 := #10
+len := t3
+DEC arr 40
+DEC result 4
+t4 := #0
+result := t4
+t6 := #0
+i_cnt := t6
+t5 := i_cnt
+LABEL label1 :
+t7 := i_cnt
+t8 := len
+IF t7 < t8 GOTO label2
+GOTO label3
+LABEL label2 :
+t10 := i_cnt
+t11 := t10 * #4
+t12 := &arr + t11
+t13 := #0
+*t12 := t13
+t9 := t13
+t16 := i_cnt
+t17 := #1
+t15 := t16 + t17
+i_cnt := t15
+t14 := i_cnt
+GOTO label1
+LABEL label3 :
+t19 := #0
+o_cnt := t19
+t18 := o_cnt
+LABEL label4 :
+t20 := o_cnt
+t21 := #3
+IF t20 < t21 GOTO label5
+GOTO label6
+LABEL label5 :
+READ t23
+i := t23
+t22 := i
+READ t25
+j := t25
+t24 := j
+t26 := i
+t27 := #10
+IF t26 > t27 GOTO label7
+GOTO label8
+LABEL label7 :
+t31 := #1
+t32 := i
+t30 := t31 + t32
+t35 := i
+t36 := #10
+t34 := t35 / t36
+t37 := #10
+t33 := t34 * t37
+t29 := t30 - t33
+i := t29
+t28 := i
+LABEL label8 :
+t38 := j
+t39 := #10
+IF t38 > t39 GOTO label9
+GOTO label10
+LABEL label9 :
+t43 := #2
+t44 := j
+t42 := t43 + t44
+t47 := j
+t48 := #10
+t46 := t47 / t48
+t49 := #10
+t45 := t46 * t49
+t41 := t42 - t45
+j := t41
+t40 := j
+LABEL label10 :
+t51 := #0
+i_cnt := t51
+t50 := i_cnt
+LABEL label11 :
+t52 := i_cnt
+t53 := len
+IF t52 < t53 GOTO label12
+GOTO label13
+LABEL label12 :
+t55 := i_cnt
+t56 := t55 * #4
+t57 := &arr + t56
+t62 := i_cnt
+t63 := t62 * #4
+t64 := &arr + t63
+t61 := *t64
+t65 := #2
+t60 := t61 / t65
+t66 := i
+t59 := t60 + t66
+t67 := j
+t58 := t59 - t67
+*t57 := t58
+t54 := t58
+t70 := i_cnt
+t71 := #1
+t69 := t70 + t71
+i_cnt := t69
+t68 := i_cnt
+GOTO label11
+LABEL label13 :
+t74 := o_cnt
+t75 := #1
+t73 := t74 + t75
+o_cnt := t73
+t72 := o_cnt
+GOTO label4
+LABEL label6 :
+t77 := #0
+i_cnt := t77
+t76 := i_cnt
+LABEL label14 :
+t78 := i_cnt
+t79 := len
+IF t78 < t79 GOTO label15
+GOTO label16
+LABEL label15 :
+t82 := result
+t84 := i_cnt
+t85 := t84 * #4
+t86 := &arr + t85
+t83 := *t86
+t81 := t82 + t83
+result := t81
+t80 := result
+t89 := i_cnt
+t90 := #1
+t88 := t89 + t90
+i_cnt := t88
+t87 := i_cnt
+GOTO label14
+LABEL label16 :
+WRITE result
+t92 := #0
+RETURN t92

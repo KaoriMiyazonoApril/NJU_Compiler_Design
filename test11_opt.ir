@@ -1,0 +1,88 @@
+FUNCTION main :
+o_cnt := #0
+i_cnt := #0
+len := #10
+DEC arr 40
+result := #0
+i_cnt := #0
+LABEL label1 :
+IF i_cnt < len GOTO label2
+GOTO label3
+LABEL label2 :
+t1 := i_cnt
+t2 := t1 * #4
+t3 := &arr + t2
+*t3 := #0
+t4 := i_cnt + #1
+i_cnt := t4
+GOTO label1
+LABEL label3 :
+o_cnt := #0
+LABEL label4 :
+IF o_cnt < #3 GOTO label5
+GOTO label6
+LABEL label5 :
+READ t5
+i := t5
+READ t6
+j := t6
+IF i > #10 GOTO label7
+GOTO label8
+LABEL label7 :
+t8 := #1 + i
+t10 := i / #10
+t9 := t10 * #10
+t7 := t8 - t9
+i := t7
+LABEL label8 :
+IF j > #10 GOTO label9
+GOTO label10
+LABEL label9 :
+t12 := #2 + j
+t14 := j / #10
+t13 := t14 * #10
+t11 := t12 - t13
+j := t11
+LABEL label10 :
+i_cnt := #0
+LABEL label11 :
+IF i_cnt < len GOTO label12
+GOTO label13
+LABEL label12 :
+t15 := i_cnt
+t16 := t15 * #4
+t17 := &arr + t16
+t22 := i_cnt
+t23 := t22 * #4
+t24 := &arr + t23
+t21 := *t24
+t20 := t21 / #2
+t19 := t20 + i
+t18 := t19 - j
+*t17 := t18
+t25 := i_cnt + #1
+i_cnt := t25
+GOTO label11
+LABEL label13 :
+t26 := o_cnt + #1
+o_cnt := t26
+GOTO label4
+LABEL label6 :
+i_cnt := #0
+LABEL label14 :
+IF i_cnt < len GOTO label15
+GOTO label16
+LABEL label15 :
+t29 := i_cnt
+t30 := t29 * #4
+t31 := &arr + t30
+t28 := *t31
+t27 := result + t28
+result := t27
+t32 := i_cnt + #1
+i_cnt := t32
+GOTO label14
+LABEL label16 :
+WRITE result
+t34 := #0
+RETURN t34
